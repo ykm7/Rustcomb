@@ -5,6 +5,8 @@ use std::io::BufRead;
 use std::io::BufReader;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::thread;
 use std::time::Instant;
 
 use clap::Parser;
@@ -19,6 +21,7 @@ struct FileInfo {
 
 // /// Search for a pattern in a file and display the lines that contain it.
 #[derive(Parser)]
+#[clap(name = "Rustcomb")]
 struct Cli {
     /// The pattern to look for
     path_pattern: String,
@@ -40,13 +43,17 @@ fn find_files(
         if path.is_dir() {
             find_files(&path, re, matched_paths)?;
         } else {
-            let filename = entry
+            let filename = path
                 .file_name()
-                .into_string()
-                .map_err(|err| format!("Failed to convert OsString to String: '{:?}'", err))?;
+                .and_then(|os_str| os_str.to_str())
+                .ok_or_else(|| format!("Invalid filename: {:?}", path))?;
+            // .map_err(|err| format!("Failed to convert OsString to String: '{:?}'", err))?;
 
-            if re.is_match(&filename) {
-                matched_paths.push(FileInfo { path, filename });
+            if re.is_match(filename) {
+                matched_paths.push(FileInfo {
+                    path: path.clone(),
+                    filename: filename.to_string(),
+                });
             }
         }
     }
@@ -72,16 +79,20 @@ fn find_entry_within_file(
     Ok(found_lines)
 }
 
-fn setup<I, T>(args: I) -> Result<(), Box<dyn Error>>
-where
-    I: IntoIterator<Item = T>,
-    T: Into<std::ffi::OsString> + Clone,
-{
-    let args = Cli::parse_from(args);
+fn clean_up_regex(pattern: &str) -> Result<regex::Regex, regex::Error> {
+    let escaped = regex::escape(pattern);
+    let replaced = escaped.replace("\\*", ".*").to_string();
+    Regex::new(replaced.as_str())
+}
+
+fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
+    println!("Args - path_pattern: {:?}", args.path_pattern);
+    println!("Args - path: {:?}", args.path);
+    println!("Args - file_pattern: {:?}", args.file_pattern);
 
     let mut matched_paths: Vec<FileInfo> = Vec::new();
 
-    let file_pattern_re: Regex = match Regex::new(&args.path_pattern) {
+    let file_pattern_re: Regex = match clean_up_regex(&args.path_pattern) {
         Err(err) => {
             panic!(
                 "Unable to accept pattern as valid regex: {} with err: {}",
@@ -105,18 +116,32 @@ where
         return Ok(());
     }
 
-    let string_pattern_re = Regex::new(&args.file_pattern)?;
+    let mut handles = Vec::new();
+    let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
     for file in matched_paths {
         println!("Path: {:?}", file.path);
         println!("Filename: {:?}", file.filename);
 
-        let found_matches = find_entry_within_file(file, &string_pattern_re)?;
-        let found_matches_count = found_matches.len();
-        if found_matches_count != 0 {
-            println!("Found {} matches.", found_matches_count);
-            for m in found_matches {
-                println!("{}", m);
-            }
+        let re: Arc<Regex> = Arc::clone(&string_pattern_re);
+
+        let handle: thread::JoinHandle<Vec<String>> =
+            thread::spawn(move || match find_entry_within_file(file, &re) {
+                Err(err) => {
+                    eprintln!("Error while searching file {}", err);
+                    Vec::new()
+                }
+                Ok(found) => found,
+            });
+
+        handles.push(handle);
+    }
+
+    let results = handles.into_iter().map(|f| f.join().unwrap());
+    let found_matches_count = results.len();
+    println!("Found {} matches.", found_matches_count);
+    for r in results {
+        for m in r {
+            println!("{}", m);
         }
     }
 
@@ -124,7 +149,11 @@ where
 }
 
 fn main() {
-    let _ = setup(wild::args_os());
+    let args = Cli::parse_from(wild::args_os());
+    if let Err(e) = setup(args) {
+        eprintln!("Error: {}", e);
+        std::process::exit(1);
+    }
 }
 
 #[cfg(test)]
@@ -135,7 +164,11 @@ mod tests {
 
     #[test]
     fn test_setup() {
-        assert!(setup(["Rustcomb", "PATTERN", "."]).is_ok());
+        let args = vec!["Rustcomb", "*.txt", ".", "hello"];
+
+        let args = Cli::parse_from(args);
+        // Use setup_with_args instead of setup to pass custom arguments
+        assert!(setup(args).is_ok());
     }
 
     // #[test]
