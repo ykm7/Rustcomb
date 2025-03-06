@@ -1,5 +1,8 @@
 use std::error::Error;
 use std::fs;
+use std::fs::File;
+use std::io::BufRead;
+use std::io::BufReader;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -18,12 +21,14 @@ struct FileInfo {
 #[derive(Parser)]
 struct Cli {
     /// The pattern to look for
-    pattern: String,
+    path_pattern: String,
     /// The path to the file to read
     path: std::path::PathBuf,
+
+    file_pattern: String,
 }
 
-fn visit_dirs(
+fn find_files(
     dir: &Path,
     re: &Regex,
     matched_paths: &mut Vec<FileInfo>,
@@ -33,7 +38,7 @@ fn visit_dirs(
         let path: PathBuf = entry.path();
 
         if path.is_dir() {
-            visit_dirs(&path, re, matched_paths)?;
+            find_files(&path, re, matched_paths)?;
         } else {
             let filename = entry
                 .file_name()
@@ -49,6 +54,24 @@ fn visit_dirs(
     Ok(())
 }
 
+fn find_entry_within_file(
+    f: FileInfo,
+    re: &Regex,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let file = File::open(f.path)?;
+    let reader = BufReader::new(file);
+
+    let mut found_lines = Vec::new();
+    for (idx, line) in reader.lines().enumerate() {
+        let line = line?;
+        if re.is_match(&line) {
+            found_lines.push(format!("Line {} - {}", idx, line));
+        }
+    }
+
+    Ok(found_lines)
+}
+
 fn setup<I, T>(args: I) -> Result<(), Box<dyn Error>>
 where
     I: IntoIterator<Item = T>,
@@ -58,18 +81,18 @@ where
 
     let mut matched_paths: Vec<FileInfo> = Vec::new();
 
-    let re: Regex = match Regex::new(&args.pattern) {
+    let file_pattern_re: Regex = match Regex::new(&args.path_pattern) {
         Err(err) => {
             panic!(
                 "Unable to accept pattern as valid regex: {} with err: {}",
-                args.pattern, err
+                args.path_pattern, err
             );
         }
         Ok(re) => re,
     };
 
     let start = Instant::now();
-    if let Err(err) = visit_dirs(&args.path, &re, &mut matched_paths) {
+    if let Err(err) = find_files(&args.path, &file_pattern_re, &mut matched_paths) {
         println!("{:?}", err);
         return Err(err);
     }
@@ -82,9 +105,19 @@ where
         return Ok(());
     }
 
+    let string_pattern_re = Regex::new(&args.file_pattern)?;
     for file in matched_paths {
         println!("Path: {:?}", file.path);
         println!("Filename: {:?}", file.filename);
+
+        let found_matches = find_entry_within_file(file, &string_pattern_re)?;
+        let found_matches_count = found_matches.len();
+        if found_matches_count != 0 {
+            println!("Found {} matches.", found_matches_count);
+            for m in found_matches {
+                println!("{}", m);
+            }
+        }
     }
 
     Ok(())
