@@ -1,3 +1,5 @@
+use core::fmt;
+use std::env;
 use std::error::Error;
 use std::fs;
 use std::fs::File;
@@ -14,9 +16,16 @@ use regex::Regex;
 // #[warn(unused_imports)]
 // use regex::Regex;
 
+#[derive(Clone)]
 struct FileInfo {
     path: PathBuf,
     filename: String,
+}
+
+impl fmt::Display for FileInfo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Path: {:?}, Filename: {}", self.path, self.filename)
+    }
 }
 
 // /// Search for a pattern in a file and display the lines that contain it.
@@ -108,7 +117,7 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
         return Err(err);
     }
     let duration = start.elapsed();
-    println!("Time taken for total (identifying files): {:?}", duration);
+    println!("Time taken for identifying files: {:?}", duration);
 
     let num_found = matched_paths.len();
     println!("Found {} files to examine", num_found);
@@ -123,9 +132,9 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
         println!("Filename: {:?}", file.filename);
 
         let re: Arc<Regex> = Arc::clone(&string_pattern_re);
-
+        let interal_file = file.clone();
         let handle: thread::JoinHandle<Vec<String>> =
-            thread::spawn(move || match find_entry_within_file(file, &re) {
+            thread::spawn(move || match find_entry_within_file(interal_file, &re) {
                 Err(err) => {
                     eprintln!("Error while searching file {}", err);
                     Vec::new()
@@ -133,13 +142,14 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
                 Ok(found) => found,
             });
 
-        handles.push(handle);
+        handles.push((file, handle));
     }
 
-    let results = handles.into_iter().map(|f| f.join().unwrap());
+    let results = handles.into_iter().map(|f| (f.0, f.1.join().unwrap()));
     let found_matches_count = results.len();
     println!("Found {} matches.", found_matches_count);
-    for r in results {
+    for (f, r) in results {
+        println!("Filename is: {}", f);
         for m in r {
             println!("{}", m);
         }
