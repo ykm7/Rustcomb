@@ -13,8 +13,7 @@ use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Instant;
 use threadpool::ThreadPool;
-// #[warn(unused_imports)]
-// use regex::Regex;
+use rayon::prelude::*;
 
 #[derive(Clone)]
 struct FileInfo {
@@ -133,10 +132,33 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
     );
 
     let start = Instant::now();
-    use_thread_pool(matched_paths.clone(), args.clone(), false)?;
+    use_thread_pool(matched_paths.clone(), args.clone(), false, 1)?;
     let duration = start.elapsed();
     println!(
-        "Time taken to search through files using a thread pool: {:?}",
+        "Time taken to search through files using a thread pool (thread of 1): {:?}",
+        duration
+    );
+
+    let num_cpus = num_cpus::get();
+    let number_of_workers = num_cpus;
+    let start = Instant::now();
+    use_thread_pool(
+        matched_paths.clone(),
+        args.clone(),
+        false,
+        number_of_workers,
+    )?;
+    let duration = start.elapsed();
+    println!(
+        "Time taken to search through files using a thread pool (thread of {}): {:?}",
+        num_cpus, duration,
+    );
+
+    let start = Instant::now();
+    use_rayon(matched_paths.clone(), args.clone(), false)?;
+    let duration = start.elapsed();
+    println!(
+        "Time taken to search through files using Rayon: {:?}",
         duration
     );
 
@@ -188,8 +210,9 @@ fn use_thread_pool(
     matched_paths: Vec<FileInfo>,
     args: Cli,
     debug: bool,
+    number_of_workers: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let number_of_workers = 4;
+    println!("Using {} number of workers", number_of_workers);
     let number_of_jobs = matched_paths.len();
     let pool = ThreadPool::new(number_of_workers);
     let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
@@ -214,6 +237,43 @@ fn use_thread_pool(
     }
 
     let results: Vec<_> = rx.iter().take(number_of_jobs).collect();
+    let found_matches_count = results.len();
+    println!("Found {} matches.", found_matches_count);
+    for (f, r) in results {
+        if !r.is_empty() && debug {
+            println!("Filename found with matches: {}", f);
+            for m in r {
+                println!("{}", m);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn use_rayon(
+    matched_paths: Vec<FileInfo>,
+    args: Cli,
+    debug: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
+
+    let results: Vec<_> = matched_paths
+        .par_iter()
+        .map(|file| {
+            let re: Arc<Regex> = Arc::clone(&string_pattern_re);
+            let internal_file = file.clone();
+
+            match find_entry_within_file(file.clone(), &re) {
+                Err(err) => {
+                    eprintln!("Error while searching file {}", err);
+                    (internal_file, Vec::new())
+                }
+                Ok(found) => (internal_file, found),
+            }
+        })
+        .collect();
+
     let found_matches_count = results.len();
     println!("Found {} matches.", found_matches_count);
     for (f, r) in results {
