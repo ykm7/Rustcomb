@@ -1,5 +1,4 @@
 use core::fmt;
-use std::env;
 use std::error::Error;
 use std::fs;
 use std::fs::File;
@@ -125,6 +124,18 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
+    use_default_thread_spawn(matched_paths, args)?;
+
+    Ok(())
+}
+
+/**
+ * This is the initial implementation using thread::spawn
+ */
+fn use_default_thread_spawn(
+    matched_paths: Vec<FileInfo>,
+    args: Cli,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut handles = Vec::new();
     let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
     for file in matched_paths {
