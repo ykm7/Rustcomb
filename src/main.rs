@@ -1,4 +1,6 @@
+use clap::Parser;
 use core::fmt;
+use regex::Regex;
 use std::error::Error;
 use std::fs;
 use std::fs::File;
@@ -7,11 +9,10 @@ use std::io::BufReader;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Instant;
-
-use clap::Parser;
-use regex::Regex;
+use threadpool::ThreadPool;
 // #[warn(unused_imports)]
 // use regex::Regex;
 
@@ -26,9 +27,8 @@ impl fmt::Display for FileInfo {
         write!(f, "Path: {:?}, Filename: {}", self.path, self.filename)
     }
 }
-
 // /// Search for a pattern in a file and display the lines that contain it.
-#[derive(Parser)]
+#[derive(Parser, Clone)]
 #[clap(name = "Rustcomb")]
 struct Cli {
     /// The pattern to look for
@@ -124,7 +124,21 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    use_default_thread_spawn(matched_paths, args)?;
+    let start = Instant::now();
+    use_thread_per_file(matched_paths.clone(), args.clone(), false)?;
+    let duration = start.elapsed();
+    println!(
+        "Time taken to search through files using a thread per each file: {:?}",
+        duration
+    );
+
+    let start = Instant::now();
+    use_thread_pool(matched_paths.clone(), args.clone(), false)?;
+    let duration = start.elapsed();
+    println!(
+        "Time taken to search through files using a thread pool: {:?}",
+        duration
+    );
 
     Ok(())
 }
@@ -132,16 +146,14 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
 /**
  * This is the initial implementation using thread::spawn
  */
-fn use_default_thread_spawn(
+fn use_thread_per_file(
     matched_paths: Vec<FileInfo>,
     args: Cli,
+    debug: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut handles = Vec::new();
     let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
     for file in matched_paths {
-        println!("Path: {:?}", file.path);
-        println!("Filename: {:?}", file.filename);
-
         let re: Arc<Regex> = Arc::clone(&string_pattern_re);
         let interal_file = file.clone();
         let handle: thread::JoinHandle<Vec<String>> =
@@ -158,11 +170,58 @@ fn use_default_thread_spawn(
 
     let results = handles.into_iter().map(|f| (f.0, f.1.join().unwrap()));
     let found_matches_count = results.len();
+
     println!("Found {} matches.", found_matches_count);
     for (f, r) in results {
-        println!("Filename is: {}", f);
-        for m in r {
-            println!("{}", m);
+        if !r.is_empty() && debug {
+            println!("Filename found with matches: {}", f);
+            for m in r {
+                println!("{}", m);
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn use_thread_pool(
+    matched_paths: Vec<FileInfo>,
+    args: Cli,
+    debug: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let number_of_workers = 4;
+    let number_of_jobs = matched_paths.len();
+    let pool = ThreadPool::new(number_of_workers);
+    let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
+
+    let (tx, rx) = channel();
+    for file in matched_paths {
+        let tx = tx.clone();
+        let re: Arc<Regex> = Arc::clone(&string_pattern_re);
+        let internal_file = file.clone();
+
+        pool.execute(move || match find_entry_within_file(file.clone(), &re) {
+            Err(err) => {
+                eprintln!("Error while searching file {}", err);
+                tx.send((internal_file, Vec::new()))
+                    .expect("Critical error when handling error on file internal search");
+            }
+            Ok(found) => {
+                tx.send((internal_file, found))
+                    .expect("Critical error while handling successful file internal searc");
+            }
+        });
+    }
+
+    let results: Vec<_> = rx.iter().take(number_of_jobs).collect();
+    let found_matches_count = results.len();
+    println!("Found {} matches.", found_matches_count);
+    for (f, r) in results {
+        if !r.is_empty() && debug {
+            println!("Filename found with matches: {}", f);
+            for m in r {
+                println!("{}", m);
+            }
         }
     }
 
