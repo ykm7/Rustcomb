@@ -40,10 +40,7 @@ struct Cli {
     file_pattern: String,
 }
 
-fn find_files(
-    dir: &Path,
-    re: &Regex,
-) -> Result<impl Iterator<Item = Result<FileInfo, Box<dyn Error>>>, Box<dyn Error>> {
+fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = Result<FileInfo, Box<dyn Error>>> {
     // let re_clone = re.clone();
     let iterator = WalkDir::new(dir).into_iter().filter_map(|entry| {
         let entry = match entry {
@@ -61,18 +58,56 @@ fn find_files(
         match filename {
             Some(filename) => {
                 if re.is_match(filename) {
-                    return Some(Ok(FileInfo {
+                    Some(Ok(FileInfo {
                         path: path.to_path_buf(),
                         filename: filename.to_string(),
-                    }));
+                    }))
                 } else {
-                    return None;
+                    None
                 }
             }
             None => None,
         }
     });
-    Ok(iterator)
+    iterator
+}
+
+fn rayon_find_files(
+    dir: &Path,
+    re: &Regex,
+) -> impl ParallelIterator<Item = Result<FileInfo, Box<dyn Error + Send + Sync>>> {
+    let iterator = WalkDir::new(dir)
+        .into_iter()
+        .par_bridge()
+        .filter_map(|entry| {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(err) => return Some(Err(err.into())),
+            };
+
+            if !entry.file_type().is_file() {
+                return None;
+            }
+
+            let path = entry.path();
+            let filename = path.file_name().and_then(|os_str| os_str.to_str());
+
+            match filename {
+                Some(filename) => {
+                    if re.is_match(filename) {
+                        Some(Ok(FileInfo {
+                            path: path.to_path_buf(),
+                            filename: filename.to_string(),
+                        }))
+                    } else {
+                        None
+                    }
+                }
+                None => None,
+            }
+        });
+
+    iterator
 }
 
 fn find_entry_within_file(
@@ -117,9 +152,9 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
     };
 
     let start = Instant::now();
-
-    let iterator = find_files(&args.path, &file_pattern_re)?;
-
+    let iterator = find_files(&args.path, &file_pattern_re);
+    let duration = start.elapsed();
+    println!("Time taken for identifying files: {:?}", duration);
     // let iterator = match find_files(&args.path, &file_pattern_re) {
     //     Ok(iterator) => iterator,
     //     Err(err) => {
@@ -128,9 +163,11 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
     //     },
     // };
 
+    let start = Instant::now();
+    let rayon_iterator = rayon_find_files(&args.path, &file_pattern_re);
     let duration = start.elapsed();
-    println!("Time taken for identifying files: {:?}", duration);
-
+    println!("Time taken for identifying files (rayon): {:?}", duration);
+    
     // let num_found = matched_paths.len();
     // println!("Found {} files to examine", num_found);
     // if num_found == 0 {
@@ -147,8 +184,10 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
         start.elapsed()
     );
 
+    // let matched_paths = iterator.collect::<Vec<Result<_, _>>>();
+
     // let start_thread_per_file = Instant::now();
-    // use_thread_per_file(matched_paths.clone(), args.clone(), false)?;
+    // use_thread_per_file(matched_paths, args.clone(), false)?;
     // println!(
     //     "Time taken to search through files using a thread per each file: {:?} - total: {:?}",
     //     start_thread_per_file.elapsed(),
@@ -179,13 +218,13 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
     //     start.elapsed()
     // );
 
-    // let start_rayon = Instant::now();
-    // use_rayon(matched_paths.clone(), args.clone(), false)?;
-    // println!(
-    //     "Time taken to search through files using Rayon: {:?} - total: {:?}",
-    //     start_rayon.elapsed(),
-    //     start.elapsed()
-    // );
+    let start_rayon = Instant::now();
+    use_rayon(rayon_iterator, args.clone(), false);
+    println!(
+        "Time taken to search through files using Rayon: {:?} - total: {:?}",
+        start_rayon.elapsed(),
+        start.elapsed()
+    );
 
     Ok(())
 }
@@ -318,20 +357,25 @@ fn use_thread_pool(
     Ok(())
 }
 
-fn use_rayon(
-    matched_paths: Vec<FileInfo>,
-    args: Cli,
-    debug: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn use_rayon<I>(iterator: I, args: Cli, debug: bool) -> Result<(), Box<dyn Error + Send + Sync>>
+where
+    I: ParallelIterator<Item = Result<FileInfo, Box<dyn Error + Send + Sync>>>,
+{
     let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
 
-    let results: Vec<_> = matched_paths
-        .par_iter()
+    let results: Vec<_> = iterator
+        .filter_map(|item| match item {
+            Ok(file) => Some(file),
+            Err(err) => {
+                eprintln!("Error parsing item: {:?}", err);
+                None
+            }
+        })
         .map(|file| {
             let re: Arc<Regex> = Arc::clone(&string_pattern_re);
             let internal_file = file.clone();
 
-            match find_entry_within_file(file, &re) {
+            match find_entry_within_file(&file, &re) {
                 Err(err) => {
                     eprintln!("Error while searching file {}", err);
                     (internal_file, Vec::new())
