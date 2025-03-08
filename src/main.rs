@@ -69,10 +69,10 @@ fn find_files(
 }
 
 fn find_entry_within_file(
-    f: FileInfo,
+    f: &FileInfo,
     re: &Regex,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let file = File::open(f.path)?;
+    let file = File::open(&f.path)?;
     let reader = BufReader::new(file);
 
     let mut found_lines = Vec::new();
@@ -123,6 +123,14 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
+    let start_single_thread = Instant::now();
+    use_single_thread(matched_paths.clone(), args.clone(), false)?;
+    println!(
+        "Time taken to search through files using a single thread: {:?} - total: {:?}",
+        start_single_thread.elapsed(),
+        start.elapsed()
+    );
+
     let start_thread_per_file = Instant::now();
     use_thread_per_file(matched_paths.clone(), args.clone(), false)?;
     println!(
@@ -166,6 +174,40 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+fn use_single_thread(
+    matched_paths: Vec<FileInfo>,
+    args: Cli,
+    debug: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // let mut results: Vec<(FileInfo, Vec<String>)> = Vec::new();
+    let string_pattern_re = clean_up_regex(&args.file_pattern)?;
+
+    let results: Vec<(FileInfo, Vec<String>)> = matched_paths
+        .into_iter()
+        .map(|file| {
+            let found: Vec<String> = find_entry_within_file(&file, &string_pattern_re)
+                .unwrap_or_else(|err| {
+                    eprintln!("Error while searching file {}", err);
+                    Vec::new()
+                });
+            (file, found)
+        })
+        .collect();
+
+    let found_matches_count = results.len();
+    println!("Found {} matches.", found_matches_count);
+    for (f, r) in results {
+        if !r.is_empty() && debug {
+            println!("Filename found with matches: {}", f);
+            for m in r {
+                println!("{}", m);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 /**
  * This is the initial implementation using thread::spawn
  */
@@ -180,7 +222,7 @@ fn use_thread_per_file(
         let re: Arc<Regex> = Arc::clone(&string_pattern_re);
         let interal_file = file.clone();
         let handle: thread::JoinHandle<Vec<String>> =
-            thread::spawn(move || match find_entry_within_file(interal_file, &re) {
+            thread::spawn(move || match find_entry_within_file(&file, &re) {
                 Err(err) => {
                     eprintln!("Error while searching file {}", err);
                     Vec::new()
@@ -188,7 +230,7 @@ fn use_thread_per_file(
                 Ok(found) => found,
             });
 
-        handles.push((file, handle));
+        handles.push((interal_file, handle));
     }
 
     let results = handles.into_iter().map(|f| (f.0, f.1.join().unwrap()));
@@ -224,7 +266,7 @@ fn use_thread_pool(
         let re: Arc<Regex> = Arc::clone(&string_pattern_re);
         let internal_file = file.clone();
 
-        pool.execute(move || match find_entry_within_file(file.clone(), &re) {
+        pool.execute(move || match find_entry_within_file(&file, &re) {
             Err(err) => {
                 eprintln!("Error while searching file {}", err);
                 tx.send((internal_file, Vec::new()))
@@ -265,7 +307,7 @@ fn use_rayon(
             let re: Arc<Regex> = Arc::clone(&string_pattern_re);
             let internal_file = file.clone();
 
-            match find_entry_within_file(file.clone(), &re) {
+            match find_entry_within_file(file, &re) {
                 Err(err) => {
                     eprintln!("Error while searching file {}", err);
                     (internal_file, Vec::new())
