@@ -2,6 +2,7 @@ use clap::Parser;
 use core::fmt;
 use rayon::prelude::*;
 use regex::Regex;
+use std::collections::btree_map::Entry;
 use std::error::Error;
 use std::fs;
 use std::fs::File;
@@ -14,6 +15,7 @@ use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Instant;
 use threadpool::ThreadPool;
+use walkdir::WalkDir;
 
 #[derive(Clone)]
 struct FileInfo {
@@ -41,31 +43,36 @@ struct Cli {
 fn find_files(
     dir: &Path,
     re: &Regex,
-    matched_paths: &mut Vec<FileInfo>,
-) -> Result<(), Box<dyn Error>> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path: PathBuf = entry.path();
+) -> Result<impl Iterator<Item = Result<FileInfo, Box<dyn Error>>>, Box<dyn Error>> {
+    // let re_clone = re.clone();
+    let iterator = WalkDir::new(dir).into_iter().filter_map(|entry| {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(err) => return Some(Err(err.into())),
+        };
 
-        if path.is_dir() {
-            find_files(&path, re, matched_paths)?;
-        } else {
-            let filename = path
-                .file_name()
-                .and_then(|os_str| os_str.to_str())
-                .ok_or_else(|| format!("Invalid filename: {:?}", path))?;
-            // .map_err(|err| format!("Failed to convert OsString to String: '{:?}'", err))?;
-
-            if re.is_match(filename) {
-                matched_paths.push(FileInfo {
-                    path: path.clone(),
-                    filename: filename.to_string(),
-                });
-            }
+        if !entry.file_type().is_file() {
+            return None;
         }
-    }
 
-    Ok(())
+        let path = entry.path();
+        let filename = path.file_name().and_then(|os_str| os_str.to_str());
+
+        match filename {
+            Some(filename) => {
+                if re.is_match(filename) {
+                    return Some(Ok(FileInfo {
+                        path: path.to_path_buf(),
+                        filename: filename.to_string(),
+                    }));
+                } else {
+                    return None;
+                }
+            }
+            None => None,
+        }
+    });
+    Ok(iterator)
 }
 
 fn find_entry_within_file(
@@ -97,7 +104,7 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
     println!("Args - path: {:?}", args.path);
     println!("Args - file_pattern: {:?}", args.file_pattern);
 
-    let mut matched_paths: Vec<FileInfo> = Vec::new();
+    // let mut matched_paths: Vec<FileInfo> = Vec::new();
 
     let file_pattern_re: Regex = match clean_up_regex(&args.path_pattern) {
         Err(err) => {
@@ -110,88 +117,105 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
     };
 
     let start = Instant::now();
-    if let Err(err) = find_files(&args.path, &file_pattern_re, &mut matched_paths) {
-        println!("{:?}", err);
-        return Err(err);
-    }
+
+    let iterator = find_files(&args.path, &file_pattern_re)?;
+
+    // let iterator = match find_files(&args.path, &file_pattern_re) {
+    //     Ok(iterator) => iterator,
+    //     Err(err) => {
+    //         println!("{:?}", err);
+    //         panic!("Error during file search: {:?}", err);
+    //     },
+    // };
+
     let duration = start.elapsed();
     println!("Time taken for identifying files: {:?}", duration);
 
-    let num_found = matched_paths.len();
-    println!("Found {} files to examine", num_found);
-    if num_found == 0 {
-        return Ok(());
-    }
+    // let num_found = matched_paths.len();
+    // println!("Found {} files to examine", num_found);
+    // if num_found == 0 {
+    //     return Ok(());
+    // }
+
+    // let matched_paths: Vec<_> = iterator.collect::<Result<Vec<_>, _>>()?;
 
     let start_single_thread = Instant::now();
-    use_single_thread(matched_paths.clone(), args.clone(), false)?;
+    use_single_thread(iterator, args.clone(), false)?;
     println!(
         "Time taken to search through files using a single thread: {:?} - total: {:?}",
         start_single_thread.elapsed(),
         start.elapsed()
     );
 
-    let start_thread_per_file = Instant::now();
-    use_thread_per_file(matched_paths.clone(), args.clone(), false)?;
-    println!(
-        "Time taken to search through files using a thread per each file: {:?} - total: {:?}",
-        start_thread_per_file.elapsed(),
-        start.elapsed()
-    );
+    // let start_thread_per_file = Instant::now();
+    // use_thread_per_file(matched_paths.clone(), args.clone(), false)?;
+    // println!(
+    //     "Time taken to search through files using a thread per each file: {:?} - total: {:?}",
+    //     start_thread_per_file.elapsed(),
+    //     start.elapsed()
+    // );
 
-    let start_thread_pool_1 = Instant::now();
-    use_thread_pool(matched_paths.clone(), args.clone(), false, 1)?;
-    println!(
-        "Time taken to search through files using a thread pool (thread of 1): {:?} - total: {:?}",
-        start_thread_pool_1.elapsed(),
-        start.elapsed()
-    );
+    // let start_thread_pool_1 = Instant::now();
+    // use_thread_pool(matched_paths.clone(), args.clone(), false, 1)?;
+    // println!(
+    //     "Time taken to search through files using a thread pool (thread of 1): {:?} - total: {:?}",
+    //     start_thread_pool_1.elapsed(),
+    //     start.elapsed()
+    // );
 
-    let num_cpus = num_cpus::get();
-    let number_of_workers = num_cpus;
-    let start_thread_pool_num_cpus = Instant::now();
-    use_thread_pool(
-        matched_paths.clone(),
-        args.clone(),
-        false,
-        number_of_workers,
-    )?;
-    println!(
-        "Time taken to search through files using a thread pool (thread of {}): {:?} - total: {:?}",
-        num_cpus,
-        start_thread_pool_num_cpus.elapsed(),
-        start.elapsed()
-    );
+    // let num_cpus = num_cpus::get();
+    // let number_of_workers = num_cpus;
+    // let start_thread_pool_num_cpus = Instant::now();
+    // use_thread_pool(
+    //     matched_paths.clone(),
+    //     args.clone(),
+    //     false,
+    //     number_of_workers,
+    // )?;
+    // println!(
+    //     "Time taken to search through files using a thread pool (thread of {}): {:?} - total: {:?}",
+    //     num_cpus,
+    //     start_thread_pool_num_cpus.elapsed(),
+    //     start.elapsed()
+    // );
 
-    let start_rayon = Instant::now();
-    use_rayon(matched_paths.clone(), args.clone(), false)?;
-    println!(
-        "Time taken to search through files using Rayon: {:?} - total: {:?}",
-        start_rayon.elapsed(),
-        start.elapsed()
-    );
+    // let start_rayon = Instant::now();
+    // use_rayon(matched_paths.clone(), args.clone(), false)?;
+    // println!(
+    //     "Time taken to search through files using Rayon: {:?} - total: {:?}",
+    //     start_rayon.elapsed(),
+    //     start.elapsed()
+    // );
 
     Ok(())
 }
 
-fn use_single_thread(
-    matched_paths: Vec<FileInfo>,
+fn use_single_thread<I>(
+    iterator: I,
     args: Cli,
     debug: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // let mut results: Vec<(FileInfo, Vec<String>)> = Vec::new();
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    I: Iterator<Item = Result<FileInfo, Box<dyn Error>>>,
+{
     let string_pattern_re = clean_up_regex(&args.file_pattern)?;
-
-    let results: Vec<(FileInfo, Vec<String>)> = matched_paths
-        .into_iter()
-        .map(|file| {
-            let found: Vec<String> = find_entry_within_file(&file, &string_pattern_re)
-                .unwrap_or_else(|err| {
-                    eprintln!("Error while searching file {}", err);
-                    Vec::new()
-                });
-            (file, found)
+    let results: Vec<(FileInfo, Vec<String>)> = iterator
+        .filter_map(|item| match item {
+            Ok(file) => Some(file),
+            Err(err) => {
+                eprintln!("Error parsing item: {:?}", err);
+                None
+            }
         })
+        .filter_map(
+            |file| match find_entry_within_file(&file, &string_pattern_re) {
+                Err(err) => {
+                    eprintln!("Error while searching file {}", err);
+                    None
+                }
+                Ok(found) => Some((file, found)),
+            },
+        )
         .collect();
 
     let found_matches_count = results.len();
