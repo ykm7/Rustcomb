@@ -1,5 +1,6 @@
 use clap::Parser;
 use core::fmt;
+use rayon::prelude::*;
 use regex::Regex;
 use std::error::Error;
 use std::fs;
@@ -13,7 +14,6 @@ use std::sync::mpsc::channel;
 use std::thread;
 use std::time::Instant;
 use threadpool::ThreadPool;
-use rayon::prelude::*;
 
 #[derive(Clone)]
 struct FileInfo {
@@ -123,43 +123,44 @@ fn setup(args: Cli) -> Result<(), Box<dyn Error>> {
         return Ok(());
     }
 
-    let start = Instant::now();
+    let start_thread_per_file = Instant::now();
     use_thread_per_file(matched_paths.clone(), args.clone(), false)?;
-    let duration = start.elapsed();
     println!(
-        "Time taken to search through files using a thread per each file: {:?}",
-        duration
+        "Time taken to search through files using a thread per each file: {:?} - total: {:?}",
+        start_thread_per_file.elapsed(),
+        start.elapsed()
     );
 
-    let start = Instant::now();
+    let start_thread_pool_1 = Instant::now();
     use_thread_pool(matched_paths.clone(), args.clone(), false, 1)?;
-    let duration = start.elapsed();
     println!(
-        "Time taken to search through files using a thread pool (thread of 1): {:?}",
-        duration
+        "Time taken to search through files using a thread pool (thread of 1): {:?} - total: {:?}",
+        start_thread_pool_1.elapsed(),
+        start.elapsed()
     );
 
     let num_cpus = num_cpus::get();
     let number_of_workers = num_cpus;
-    let start = Instant::now();
+    let start_thread_pool_num_cpus = Instant::now();
     use_thread_pool(
         matched_paths.clone(),
         args.clone(),
         false,
         number_of_workers,
     )?;
-    let duration = start.elapsed();
     println!(
-        "Time taken to search through files using a thread pool (thread of {}): {:?}",
-        num_cpus, duration,
+        "Time taken to search through files using a thread pool (thread of {}): {:?} - total: {:?}",
+        num_cpus,
+        start_thread_pool_num_cpus.elapsed(),
+        start.elapsed()
     );
 
-    let start = Instant::now();
+    let start_rayon = Instant::now();
     use_rayon(matched_paths.clone(), args.clone(), false)?;
-    let duration = start.elapsed();
     println!(
-        "Time taken to search through files using Rayon: {:?}",
-        duration
+        "Time taken to search through files using Rayon: {:?} - total: {:?}",
+        start_rayon.elapsed(),
+        start.elapsed()
     );
 
     Ok(())
