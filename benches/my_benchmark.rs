@@ -1,15 +1,41 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
-fn fibonacci(n: u64) -> u64 {
-    match n {
-        0 => 1,
-        1 => 1,
-        n => fibonacci(n-1) + fibonacci(n-2),
-    }
-}
+use rustcomb::{Cli, single_thread_read_files,rayon_read_files};
 
 fn criterion_benchmark(c: &mut Criterion) {
-    c.bench_function("fib 20", |b| b.iter(|| fibonacci(black_box(20))));
+    let cli = Cli {
+        path_pattern: ".txt".to_string(),
+        path: ".\\test_file_direction\\".into(),
+        file_pattern: "test".to_string()
+    };
+    
+    c.bench_function(
+        format!("'single_thread_read_files': {:?}\n", cli).as_str(),
+        |b| {
+            b.iter(|| {
+                let cli = Cli {
+                    path_pattern: ".txt".to_string(),
+                    path: ".\\test_file_direction\\".into(),
+                    file_pattern: "test".to_string()
+                };
+                single_thread_read_files(black_box(cli))
+            })
+        },
+    );
+
+    c.bench_function(
+        format!("'rayon_read_files': {:?}\n", cli).as_str(),
+        |b| {
+            b.iter(|| {
+                let cli = Cli {
+                    path_pattern: ".txt".to_string(),
+                    path: ".\\test_file_direction\\".into(),
+                    file_pattern: "test".to_string()
+                };
+                rayon_read_files(black_box(cli))
+            })
+        },
+    );
 }
 
 criterion_group!(benches, criterion_benchmark);
