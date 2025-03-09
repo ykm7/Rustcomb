@@ -76,6 +76,43 @@ pub fn rayon_read_files(args: Cli) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+pub fn thread_per_file_read_files(args: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    let file_pattern_re: Regex = match clean_up_regex(&args.path_pattern) {
+        Err(err) => {
+            panic!(
+                "Unable to accept pattern as valid regex: {} with err: {}",
+                args.path_pattern, err
+            );
+        }
+        Ok(re) => re,
+    };
+
+    let iterator = find_files(&args.path, &file_pattern_re);
+    use_thread_per_file(iterator, &args, false)?;
+
+    Ok(())
+}
+
+pub fn threadpool_read_files(
+    args: Cli,
+    number_of_workers: usize,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let file_pattern_re: Regex = match clean_up_regex(&args.path_pattern) {
+        Err(err) => {
+            panic!(
+                "Unable to accept pattern as valid regex: {} with err: {}",
+                args.path_pattern, err
+            );
+        }
+        Ok(re) => re,
+    };
+
+    let iterator = find_files(&args.path, &file_pattern_re);
+    use_thread_pool(iterator, &args, false, number_of_workers)?;
+
+    Ok(())
+}
+
 #[derive(Clone)]
 struct FileInfo {
     path: PathBuf,
@@ -141,11 +178,16 @@ where
 /**
  * This is the initial implementation using thread::spawn
  */
-fn use_thread_per_file(
-    matched_paths: Vec<FileInfo>,
-    args: Cli,
+fn use_thread_per_file<I>(
+    iterator: I,
+    args: &Cli,
     debug: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    I: Iterator<Item = Result<FileInfo, Box<dyn Error>>>,
+{
+    let matched_paths = iterator.filter_map(|r| r.ok()).collect::<Vec<FileInfo>>();
+
     let mut handles = Vec::new();
     let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
     for file in matched_paths {
@@ -180,13 +222,17 @@ fn use_thread_per_file(
     Ok(())
 }
 
-fn use_thread_pool(
-    matched_paths: Vec<FileInfo>,
-    args: Cli,
+fn use_thread_pool<I>(
+    iterator: I,
+    args: &Cli,
     debug: bool,
     number_of_workers: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
-    println!("Using {} number of workers", number_of_workers);
+) -> Result<(), Box<dyn std::error::Error>>
+where
+    I: Iterator<Item = Result<FileInfo, Box<dyn Error>>>,
+{
+    let matched_paths = iterator.filter_map(|r| r.ok()).collect::<Vec<FileInfo>>();
+
     let number_of_jobs = matched_paths.len();
     let pool = ThreadPool::new(number_of_workers);
     let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
