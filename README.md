@@ -10,7 +10,13 @@ General
 ## Benchmarking
 As part of my continued understanding of how Rust operations I have established benchmarks of all file retrieving and parsing
 
+Benchmark all
 > cargo bench
+
+Benchmark particular one
+> cargo bench --bench my_benchmark rayon_read_files
+
+_!Note_ the lack of "benchmark_" on the benchmark function name.
 
 ## Linting (Clippy)
 
