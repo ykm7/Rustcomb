@@ -1,10 +1,11 @@
 use clap::Parser;
 use core::fmt;
-use std::error;
 use rayon::prelude::*;
 use regex::Regex;
+use std::error;
 use std::error::Error;
 use std::fs::File;
+use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::path::Path;
@@ -16,16 +17,18 @@ use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
 #[derive(Debug)]
-enum MyErrors {
+pub enum MyErrors {
     Regex(regex::Error),
-    WalkDir(walkdir::Error)
+    WalkDir(walkdir::Error),
+    FileIO(io::Error),
 }
 
 impl fmt::Display for MyErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            MyErrors::Regex(ref e) => write!(f, "regex related issue ({}", e),
-            MyErrors::WalkDir(ref e) => write!(f, "error from WalkDir related issue ({}", e)
+            MyErrors::Regex(ref e) => write!(f, "regex error: ({}", e),
+            MyErrors::WalkDir(ref e) => write!(f, "WalkDir error: ({}", e),
+            MyErrors::FileIO(ref e) => write!(f, "File IO eror: ({}", e),
         }
     }
 }
@@ -34,16 +37,11 @@ impl error::Error for MyErrors {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match *self {
             MyErrors::Regex(ref e) => Some(e),
-            MyErrors::WalkDir(ref e) => Some(e)
+            MyErrors::WalkDir(ref e) => Some(e),
+            MyErrors::FileIO(ref e) => Some(e),
         }
     }
 }
-
-// impl From<walkdir::Error> for MyErrors {
-//     fn from(err: walkdir::Error) -> MyErrors {
-//         MyErrors::WalkDir(err)
-//     }
-// }
 
 #[derive(Parser, Clone)]
 #[clap(name = "Rustcomb")]
@@ -67,7 +65,7 @@ impl std::fmt::Debug for Cli {
 }
 
 #[inline]
-pub fn single_thread_read_files(args: Cli) -> Result<(), Box<dyn std::error::Error>> {
+pub fn single_thread_read_files(args: Cli) -> Result<(), MyErrors> {
     let file_pattern_re = clean_up_regex(&args.path_pattern)?;
     let iterator = find_files(&args.path, &file_pattern_re);
     use_single_thread(iterator, &file_pattern_re, false)?;
@@ -75,22 +73,16 @@ pub fn single_thread_read_files(args: Cli) -> Result<(), Box<dyn std::error::Err
 }
 
 #[inline]
-pub fn rayon_read_files(args: Cli) -> Result<(), Box<dyn std::error::Error>> {
+pub fn rayon_read_files(args: Cli) -> Result<(), MyErrors> {
     let file_pattern_re = clean_up_regex(&args.path_pattern)?;
     let rayon_iterator = rayon_find_files(&args.path, &file_pattern_re);
-
-    match use_rayon(rayon_iterator, &file_pattern_re, false) {
-        Err(err) => {
-            eprintln!("Error on 'rayon_read_files': {:?}", err)
-        }
-        Ok(r) => r,
-    };
+    use_rayon(rayon_iterator, &file_pattern_re, false)?;
 
     Ok(())
 }
 
 #[inline]
-pub fn thread_per_file_read_files(args: Cli) -> Result<(), Box<dyn std::error::Error>> {
+pub fn thread_per_file_read_files(args: Cli) -> Result<(), MyErrors> {
     let file_pattern_re = clean_up_regex(&args.path_pattern)?;
     let iterator = find_files(&args.path, &file_pattern_re);
     use_thread_per_file(iterator, &file_pattern_re, false)?;
@@ -99,10 +91,7 @@ pub fn thread_per_file_read_files(args: Cli) -> Result<(), Box<dyn std::error::E
 }
 
 #[inline]
-pub fn threadpool_read_files(
-    args: Cli,
-    number_of_workers: usize,
-) -> Result<(), Box<dyn std::error::Error>> {
+pub fn threadpool_read_files(args: Cli, number_of_workers: usize) -> Result<(), MyErrors> {
     let file_pattern_re = clean_up_regex(&args.path_pattern)?;
     let iterator = find_files(&args.path, &file_pattern_re);
     use_thread_pool(iterator, &file_pattern_re, false, number_of_workers)?;
@@ -128,11 +117,7 @@ fn clean_up_regex(pattern: &str) -> Result<regex::Regex, MyErrors> {
     Regex::new(replaced.as_str()).map_err(MyErrors::Regex)
 }
 
-fn use_single_thread<I>(
-    iterator: I,
-    re: &Regex,
-    debug: bool,
-) -> Result<(), Box<dyn std::error::Error>>
+fn use_single_thread<I>(iterator: I, re: &Regex, debug: bool) -> Result<(), MyErrors>
 where
     I: Iterator<Item = Result<FileInfo, MyErrors>>,
 {
@@ -140,19 +125,17 @@ where
         .filter_map(|item| match item {
             Ok(file) => Some(file),
             Err(err) => {
-                eprintln!("Error parsing item: {:?}", err);
+                eprintln!("Error parsing item: {}", err);
                 None
             }
         })
-        .filter_map(
-            |file| match find_entry_within_file(&file, re) {
-                Err(err) => {
-                    eprintln!("Error while searching file {}", err);
-                    None
-                }
-                Ok(found) => Some((file, found)),
-            },
-        )
+        .filter_map(|file| match find_entry_within_file(&file, re) {
+            Err(err) => {
+                eprintln!("Error while searching file {}", err);
+                None
+            }
+            Ok(found) => Some((file, found)),
+        })
         .collect();
 
     if debug {
@@ -174,11 +157,7 @@ where
 /**
  * This is the initial implementation using thread::spawn
  */
-fn use_thread_per_file<I>(
-    iterator: I,
-    re: &Regex,
-    debug: bool,
-) -> Result<(), MyErrors>
+fn use_thread_per_file<I>(iterator: I, re: &Regex, debug: bool) -> Result<(), MyErrors>
 where
     I: Iterator<Item = Result<FileInfo, MyErrors>>,
 {
@@ -269,9 +248,9 @@ where
     Ok(())
 }
 
-fn use_rayon<I>(iterator: I, re: &Regex, debug: bool) -> Result<(), Box<dyn Error + Send + Sync>>
+fn use_rayon<I>(iterator: I, re: &Regex, debug: bool) -> Result<(), MyErrors>
 where
-    I: ParallelIterator<Item = Result<FileInfo, Box<dyn Error + Send + Sync>>>,
+    I: ParallelIterator<Item = Result<FileInfo, MyErrors>>,
 {
     let re = Arc::new(re.to_owned());
     let results: Vec<_> = iterator
@@ -347,18 +326,16 @@ fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = Result<FileInfo, M
 fn rayon_find_files(
     dir: &Path,
     re: &Regex,
-) -> impl ParallelIterator<Item = Result<FileInfo, Box<dyn Error + Send + Sync>>> {
+) -> impl ParallelIterator<Item = Result<FileInfo, MyErrors>> {
     let iterator = WalkDir::new(dir)
         .into_iter()
         .par_bridge()
-        .filter_map(|entry| {
-            match entry {
-                Ok(entry) if entry.file_type().is_file() => Some(entry),
-                Ok(_) => None,
-                Err(err) => {
-                    eprintln!("Error reading entry: {}", err);
-                    None
-                }
+        .filter_map(|entry| match entry {
+            Ok(entry) if entry.file_type().is_file() => Some(entry),
+            Ok(_) => None,
+            Err(err) => {
+                eprintln!("Error reading entry: {}", err);
+                None
             }
         })
         .filter_map(|entry| {
@@ -382,16 +359,13 @@ fn rayon_find_files(
     iterator
 }
 
-fn find_entry_within_file(
-    f: &FileInfo,
-    re: &Regex,
-) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let file = File::open(&f.path)?;
+fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
+    let file = File::open(&f.path).map_err(MyErrors::FileIO)?;
     let reader = BufReader::new(file);
 
     let mut found_lines = Vec::new();
     for (idx, line) in reader.lines().enumerate() {
-        let line = line?;
+        let line = line.map_err(MyErrors::FileIO)?;
         if re.is_match(&line) {
             found_lines.push(format!("Line {} - {}", idx, line));
         }

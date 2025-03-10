@@ -20,11 +20,11 @@ Benchmark particular one
 
 _!Note_ the lack of "benchmark_" on the benchmark function name.
 
-### CPU
+### CPU (TODO)
 
-> perf record `target\release\rustcomb.exe .txt .\test_file_direction\ test` -- --profile-time 10
+<!-- > perf record `target\release\rustcomb.exe .txt .\test_file_direction\ test` -- --profile-time 10
 
-TODO: Require WSL to be running this "locally".
+TODO: Require WSL to be running this "locally". -->
 
 ### Memory
 
