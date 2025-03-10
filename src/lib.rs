@@ -17,13 +17,15 @@ use walkdir::WalkDir;
 
 #[derive(Debug)]
 enum MyErrors {
-    Regex(regex::Error)
+    Regex(regex::Error),
+    WalkDir(walkdir::Error)
 }
 
 impl fmt::Display for MyErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            MyErrors::Regex(ref e) => write!(f, "determined to be a regex related issue ({:?}", e)
+            MyErrors::Regex(ref e) => write!(f, "regex related issue ({}", e),
+            MyErrors::WalkDir(ref e) => write!(f, "error from WalkDir related issue ({}", e)
         }
     }
 }
@@ -32,9 +34,16 @@ impl error::Error for MyErrors {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match *self {
             MyErrors::Regex(ref e) => Some(e),
+            MyErrors::WalkDir(ref e) => Some(e)
         }
     }
 }
+
+// impl From<walkdir::Error> for MyErrors {
+//     fn from(err: walkdir::Error) -> MyErrors {
+//         MyErrors::WalkDir(err)
+//     }
+// }
 
 #[derive(Parser, Clone)]
 #[clap(name = "Rustcomb")]
@@ -125,7 +134,7 @@ fn use_single_thread<I>(
     debug: bool,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    I: Iterator<Item = Result<FileInfo, Box<dyn Error>>>,
+    I: Iterator<Item = Result<FileInfo, MyErrors>>,
 {
     let results: Vec<(FileInfo, Vec<String>)> = iterator
         .filter_map(|item| match item {
@@ -169,9 +178,9 @@ fn use_thread_per_file<I>(
     iterator: I,
     re: &Regex,
     debug: bool,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> Result<(), MyErrors>
 where
-    I: Iterator<Item = Result<FileInfo, Box<dyn Error>>>,
+    I: Iterator<Item = Result<FileInfo, MyErrors>>,
 {
     let matched_paths = iterator.filter_map(|r| r.ok()).collect::<Vec<FileInfo>>();
 
@@ -214,9 +223,9 @@ fn use_thread_pool<I>(
     re: &Regex,
     debug: bool,
     number_of_workers: usize,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> Result<(), MyErrors>
 where
-    I: Iterator<Item = Result<FileInfo, Box<dyn Error>>>,
+    I: Iterator<Item = Result<FileInfo, MyErrors>>,
 {
     let matched_paths = iterator.filter_map(|r| r.ok()).collect::<Vec<FileInfo>>();
 
@@ -303,12 +312,12 @@ where
     Ok(())
 }
 
-fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = Result<FileInfo, Box<dyn Error>>> {
+fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = Result<FileInfo, MyErrors>> {
     // let re_clone = re.clone();
     let iterator = WalkDir::new(dir).into_iter().filter_map(|entry| {
         let entry = match entry {
             Ok(e) => e,
-            Err(err) => return Some(Err(err.into())),
+            Err(err) => return Some(Err(MyErrors::WalkDir(err))),
         };
 
         if !entry.file_type().is_file() {
@@ -343,18 +352,18 @@ fn rayon_find_files(
         .into_iter()
         .par_bridge()
         .filter_map(|entry| {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(err) => return Some(Err(err.into())),
-            };
-
-            if !entry.file_type().is_file() {
-                return None;
+            match entry {
+                Ok(entry) if entry.file_type().is_file() => Some(entry),
+                Ok(_) => None,
+                Err(err) => {
+                    eprintln!("Error reading entry: {}", err);
+                    None
+                }
             }
-
+        })
+        .filter_map(|entry| {
             let path = entry.path();
             let filename = path.file_name().and_then(|os_str| os_str.to_str());
-
             match filename {
                 Some(filename) => {
                     if re.is_match(filename) {
