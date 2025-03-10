@@ -1,5 +1,9 @@
 # Rustcomb
 
+This project is another Grep style program written is Rust.
+
+Purpose of this is primarily to function as a learning ground for Rust.
+
 ## CLI
 
 https://crates.io/crates/wild
@@ -8,6 +12,10 @@ General
 > cargo run .txt .\test_file_direction\ test
 
 > cargo run --release .txt .\test_file_direction\ test
+
+## Testing
+
+> cargo test
 
 ## Benchmarking
 As part of my continued understanding of how Rust operations I have established benchmarks of all file retrieving and parsing
@@ -20,13 +28,16 @@ Benchmark particular one
 
 _!Note_ the lack of "benchmark_" on the benchmark function name.
 
+### Test/Bench resources
+Several hundred duplicate files are provided with inclusions of the "test" field for the purpose of the above testing and/or benchmarking.
+
 ### CPU (TODO)
 
 <!-- > perf record `target\release\rustcomb.exe .txt .\test_file_direction\ test` -- --profile-time 10
 
 TODO: Require WSL to be running this "locally". -->
 
-### Memory
+### Memory (TODO)
 
 ## Linting (Clippy)
 

@@ -21,7 +21,7 @@ fn benchmark_single_thread_read_files(c: &mut Criterion) {
                     path: ".\\test_file_direction\\".into(),
                     file_pattern: "test".to_string(),
                 };
-                single_thread_read_files(black_box(cli))
+                single_thread_read_files(black_box(cli), false)
             })
         },
     );
@@ -43,7 +43,7 @@ fn benchmark_thread_per_file_read_files(c: &mut Criterion) {
                     path: ".\\test_file_direction\\".into(),
                     file_pattern: "test".to_string(),
                 };
-                thread_per_file_read_files(black_box(cli))
+                thread_per_file_read_files(black_box(cli), false)
             })
         },
     );
@@ -65,7 +65,7 @@ fn benchmark_use_thread_pool_1(c: &mut Criterion) {
                     path: ".\\test_file_direction\\".into(),
                     file_pattern: "test".to_string(),
                 };
-                threadpool_read_files(black_box(cli), 1)
+                threadpool_read_files(black_box(cli), false, 1)
             })
         },
     );
@@ -87,7 +87,7 @@ fn benchmark_use_thread_pool_num_cpus_get(c: &mut Criterion) {
                     path: ".\\test_file_direction\\".into(),
                     file_pattern: "test".to_string(),
                 };
-                threadpool_read_files(black_box(cli), num_cpus::get())
+                threadpool_read_files(black_box(cli), false, num_cpus::get())
             })
         },
     );
@@ -107,7 +107,7 @@ fn benchmark_rayon_read_files(c: &mut Criterion) {
                 path: ".\\test_file_direction\\".into(),
                 file_pattern: "test".to_string(),
             };
-            rayon_read_files(black_box(cli))
+            rayon_read_files(black_box(cli), false)
         })
     });
 }

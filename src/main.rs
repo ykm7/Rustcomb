@@ -1,14 +1,14 @@
 use clap::Parser;
 use std::{error::Error, time::Instant};
 
-fn setup(args: rustcomb::Cli) -> Result<(), Box<dyn Error>> {
+fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     println!("Args: {:?}", args);
 
     // let mut matched_paths: Vec<FileInfo> = Vec::new();
 
     let args_clone = args.clone();
     let start = Instant::now();
-    rustcomb::single_thread_read_files(args_clone)?;
+    rustcomb::single_thread_read_files(args_clone, print)?;
     println!(
         "Time taken for identifying files (single_thread_read_files): {:?}",
         start.elapsed()
@@ -16,7 +16,7 @@ fn setup(args: rustcomb::Cli) -> Result<(), Box<dyn Error>> {
 
     let args_clone = args.clone();
     let start = Instant::now();
-    rustcomb::thread_per_file_read_files(args_clone)?;
+    rustcomb::thread_per_file_read_files(args_clone, print)?;
     println!(
         "Time taken for identifying files (use_thread_per_file): {:?}",
         start.elapsed()
@@ -24,7 +24,7 @@ fn setup(args: rustcomb::Cli) -> Result<(), Box<dyn Error>> {
 
     let args_clone = args.clone();
     let start = Instant::now();
-    rustcomb::threadpool_read_files(args_clone, 1)?;
+    rustcomb::threadpool_read_files(args_clone, print, 1)?;
     println!(
         "Time taken for identifying files (use_thread_pool - 1 thread): {:?}",
         start.elapsed()
@@ -33,7 +33,7 @@ fn setup(args: rustcomb::Cli) -> Result<(), Box<dyn Error>> {
     let args_clone = args.clone();
     let cpus = num_cpus::get();
     let start = Instant::now();
-    rustcomb::threadpool_read_files(args_clone, cpus)?;
+    rustcomb::threadpool_read_files(args_clone, print, cpus)?;
     println!(
         "Time taken for identifying files (use_thread_pool - {} thread): {:?}",
         cpus,
@@ -42,7 +42,7 @@ fn setup(args: rustcomb::Cli) -> Result<(), Box<dyn Error>> {
 
     let args_clone = args.clone();
     let start = Instant::now();
-    rustcomb::rayon_read_files(args_clone)?;
+    rustcomb::rayon_read_files(args_clone, print)?;
     println!(
         "Time taken for identifying files (rayon_read_files): {:?}",
         start.elapsed()
@@ -53,7 +53,7 @@ fn setup(args: rustcomb::Cli) -> Result<(), Box<dyn Error>> {
 
 fn main() {
     let args = rustcomb::Cli::parse_from(wild::args_os());
-    if let Err(e) = setup(args) {
+    if let Err(e) = setup(args, true) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
@@ -67,11 +67,11 @@ mod tests {
 
     #[test]
     fn test_setup() {
+        #[cfg(debug_assertions)]
         let args = vec!["Rustcomb", "*.txt", ".", "hello"];
-
         let args = rustcomb::Cli::parse_from(args);
         // Use setup_with_args instead of setup to pass custom arguments
-        assert!(setup(args).is_ok());
+        assert!(setup(args, true).is_ok());
     }
 
     // #[test]

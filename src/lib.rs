@@ -58,43 +58,51 @@ impl std::fmt::Debug for Cli {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Path pattern: {:?}, Path: {:?}, File pattern: {}",
+            "Path pattern: {}, Path: {:?}, File pattern: {}",
             self.path_pattern, self.path, self.file_pattern
         )
     }
 }
 
 #[inline]
-pub fn single_thread_read_files(args: Cli) -> Result<(), MyErrors> {
-    let file_pattern_re = clean_up_regex(&args.path_pattern)?;
-    let iterator = find_files(&args.path, &file_pattern_re);
-    use_single_thread(iterator, &file_pattern_re, false)?;
+pub fn single_thread_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
+    let path_pattern = clean_up_regex(&args.path_pattern)?;
+    let iterator = find_files(&args.path, &path_pattern);
+    let file_pattern_re = clean_up_regex(&args.file_pattern)?;
+    use_single_thread(iterator, &file_pattern_re, print)?;
     Ok(())
 }
 
 #[inline]
-pub fn rayon_read_files(args: Cli) -> Result<(), MyErrors> {
-    let file_pattern_re = clean_up_regex(&args.path_pattern)?;
-    let rayon_iterator = rayon_find_files(&args.path, &file_pattern_re);
-    use_rayon(rayon_iterator, &file_pattern_re, false)?;
-
-    Ok(())
-}
-
-#[inline]
-pub fn thread_per_file_read_files(args: Cli) -> Result<(), MyErrors> {
-    let file_pattern_re = clean_up_regex(&args.path_pattern)?;
-    let iterator = find_files(&args.path, &file_pattern_re);
-    use_thread_per_file(iterator, &file_pattern_re, false)?;
+pub fn rayon_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
+    let path_pattern = clean_up_regex(&args.path_pattern)?;
+    let rayon_iterator = rayon_find_files(&args.path, &path_pattern);
+    let file_pattern_re = clean_up_regex(&args.file_pattern)?;
+    use_rayon(rayon_iterator, &file_pattern_re, print)?;
 
     Ok(())
 }
 
 #[inline]
-pub fn threadpool_read_files(args: Cli, number_of_workers: usize) -> Result<(), MyErrors> {
-    let file_pattern_re = clean_up_regex(&args.path_pattern)?;
-    let iterator = find_files(&args.path, &file_pattern_re);
-    use_thread_pool(iterator, &file_pattern_re, false, number_of_workers)?;
+pub fn thread_per_file_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
+    let path_pattern = clean_up_regex(&args.path_pattern)?;
+    let iterator = find_files(&args.path, &path_pattern);
+    let file_pattern_re = clean_up_regex(&args.file_pattern)?;
+    use_thread_per_file(iterator, &file_pattern_re, print)?;
+
+    Ok(())
+}
+
+#[inline]
+pub fn threadpool_read_files(
+    args: Cli,
+    print: bool,
+    number_of_workers: usize,
+) -> Result<(), MyErrors> {
+    let path_pattern = clean_up_regex(&args.path_pattern)?;
+    let iterator = find_files(&args.path, &path_pattern);
+    let file_pattern_re = clean_up_regex(&args.file_pattern)?;
+    use_thread_pool(iterator, &file_pattern_re, print, number_of_workers)?;
 
     Ok(())
 }
@@ -117,7 +125,23 @@ fn clean_up_regex(pattern: &str) -> Result<regex::Regex, MyErrors> {
     Regex::new(replaced.as_str()).map_err(MyErrors::Regex)
 }
 
-fn use_single_thread<I>(iterator: I, re: &Regex, debug: bool) -> Result<(), MyErrors>
+fn information_out(results: &Vec<(FileInfo, Vec<String>)>) {
+    let found_matches_count = results.len();
+    println!(
+        "Found {} files which match file regex.",
+        found_matches_count
+    );
+    for (f, r) in results {
+        // if !r.is_empty() {
+        println!("Filename found with matches: {}", f);
+        for m in r {
+            println!("{}", m);
+        }
+        // }
+    }
+}
+
+fn use_single_thread<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
 where
     I: Iterator<Item = Result<FileInfo, MyErrors>>,
 {
@@ -134,21 +158,18 @@ where
                 eprintln!("Error while searching file {}", err);
                 None
             }
-            Ok(found) => Some((file, found)),
+            Ok(found) => {
+                if !found.is_empty() {
+                    Some((file, found))
+                } else {
+                    None
+                }
+            }
         })
         .collect();
 
-    if debug {
-        let found_matches_count = results.len();
-        println!("Found {} matches.", found_matches_count);
-    }
-    for (f, r) in results {
-        if !r.is_empty() && debug {
-            println!("Filename found with matches: {}", f);
-            for m in r {
-                println!("{}", m);
-            }
-        }
+    if print {
+        information_out(&results);
     }
 
     Ok(())
@@ -157,7 +178,7 @@ where
 /**
  * This is the initial implementation using thread::spawn
  */
-fn use_thread_per_file<I>(iterator: I, re: &Regex, debug: bool) -> Result<(), MyErrors>
+fn use_thread_per_file<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
 where
     I: Iterator<Item = Result<FileInfo, MyErrors>>,
 {
@@ -180,18 +201,14 @@ where
         handles.push((interal_file, handle));
     }
 
-    let results = handles.into_iter().map(|f| (f.0, f.1.join().unwrap()));
-    if debug {
-        let found_matches_count = results.len();
-        println!("Found {} matches.", found_matches_count);
-    }
-    for (f, r) in results {
-        if !r.is_empty() && debug {
-            println!("Filename found with matches: {}", f);
-            for m in r {
-                println!("{}", m);
-            }
-        }
+    let results = handles
+        .into_iter()
+        .map(|f| (f.0, f.1.join().unwrap()))
+        .filter(|result| !result.1.is_empty())
+        .collect::<Vec<(FileInfo, _)>>();
+
+    if print {
+        information_out(&results);
     }
 
     Ok(())
@@ -200,7 +217,7 @@ where
 fn use_thread_pool<I>(
     iterator: I,
     re: &Regex,
-    debug: bool,
+    print: bool,
     number_of_workers: usize,
 ) -> Result<(), MyErrors>
 where
@@ -225,30 +242,30 @@ where
                     .expect("Critical error when handling error on file internal search");
             }
             Ok(found) => {
+                // if !found.is_empty() {
                 tx.send((internal_file, found))
                     .expect("Critical error while handling successful file internal searc");
+                // }
             }
         });
     }
+    drop(tx);
 
-    let results: Vec<_> = rx.iter().take(number_of_jobs).collect();
-    if debug {
-        let found_matches_count = results.len();
-        println!("Found {} matches.", found_matches_count);
-    }
-    for (f, r) in results {
-        if !r.is_empty() && debug {
-            println!("Filename found with matches: {}", f);
-            for m in r {
-                println!("{}", m);
-            }
-        }
+    let results: Vec<_> = rx
+        .iter()
+        .take(number_of_jobs)
+        .filter(|results| !results.1.is_empty())
+        .collect();
+    pool.join();
+
+    if print {
+        information_out(&results);
     }
 
     Ok(())
 }
 
-fn use_rayon<I>(iterator: I, re: &Regex, debug: bool) -> Result<(), MyErrors>
+fn use_rayon<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
 where
     I: ParallelIterator<Item = Result<FileInfo, MyErrors>>,
 {
@@ -257,35 +274,32 @@ where
         .filter_map(|item| match item {
             Ok(file) => Some(file),
             Err(err) => {
-                eprintln!("Error parsing item: {:?}", err);
+                eprintln!("Error parsing item: {}", err);
                 None
             }
         })
-        .map(|file| {
+        .filter_map(|file| {
             let re: Arc<Regex> = Arc::clone(&re);
             let internal_file = file.clone();
 
             match find_entry_within_file(&file, &re) {
                 Err(err) => {
                     eprintln!("Error while searching file {}", err);
-                    (internal_file, Vec::new())
+                    None
                 }
-                Ok(found) => (internal_file, found),
+                Ok(found) => {
+                    if !found.is_empty() {
+                        Some((internal_file, found))
+                    } else {
+                        None
+                    }
+                }
             }
         })
         .collect();
 
-    if debug {
-        let found_matches_count = results.len();
-        println!("Found {} matches.", found_matches_count);
-    }
-    for (f, r) in results {
-        if !r.is_empty() && debug {
-            println!("Filename found with matches: {}", f);
-            for m in r {
-                println!("{}", m);
-            }
-        }
+    if print {
+        information_out(&results);
     }
 
     Ok(())
@@ -367,7 +381,7 @@ fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErr
     for (idx, line) in reader.lines().enumerate() {
         let line = line.map_err(MyErrors::FileIO)?;
         if re.is_match(&line) {
-            found_lines.push(format!("Line {} - {}", idx, line));
+            found_lines.push(format!("Line {} - {}", idx + 1, line));
         }
     }
 
