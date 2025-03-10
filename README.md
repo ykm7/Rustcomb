@@ -4,6 +4,8 @@ This project is another Grep style program written is Rust.
 
 Purpose of this is primarily to function as a learning ground for Rust.
 
+NOTE: The currect project is not the final product. Given the nature of the project I will be making constant tweaks to improve the UX as well as attempting to correct/improve basic coding issues.
+
 ## CLI
 
 https://crates.io/crates/wild
