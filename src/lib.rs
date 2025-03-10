@@ -1,5 +1,6 @@
 use clap::Parser;
 use core::fmt;
+use std::error;
 use rayon::prelude::*;
 use regex::Regex;
 use std::error::Error;
@@ -13,6 +14,27 @@ use std::sync::mpsc::channel;
 use std::thread;
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
+
+#[derive(Debug)]
+enum MyErrors {
+    Regex(regex::Error)
+}
+
+impl fmt::Display for MyErrors {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match *self {
+            MyErrors::Regex(ref e) => write!(f, "determined to be a regex related issue ({:?}", e)
+        }
+    }
+}
+
+impl error::Error for MyErrors {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        match *self {
+            MyErrors::Regex(ref e) => Some(e),
+        }
+    }
+}
 
 #[derive(Parser, Clone)]
 #[clap(name = "Rustcomb")]
@@ -37,36 +59,18 @@ impl std::fmt::Debug for Cli {
 
 #[inline]
 pub fn single_thread_read_files(args: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    let file_pattern_re: Regex = match clean_up_regex(&args.path_pattern) {
-        Err(err) => {
-            panic!(
-                "Unable to accept pattern as valid regex: {} with err: {}",
-                args.path_pattern, err
-            );
-        }
-        Ok(re) => re,
-    };
-
+    let file_pattern_re = clean_up_regex(&args.path_pattern)?;
     let iterator = find_files(&args.path, &file_pattern_re);
-    use_single_thread(iterator, &args, false)?;
+    use_single_thread(iterator, &file_pattern_re, false)?;
     Ok(())
 }
 
 #[inline]
 pub fn rayon_read_files(args: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    let file_pattern_re: Regex = match clean_up_regex(&args.path_pattern) {
-        Err(err) => {
-            panic!(
-                "Unable to accept pattern as valid regex: {} with err: {}",
-                args.path_pattern, err
-            );
-        }
-        Ok(re) => re,
-    };
-
+    let file_pattern_re = clean_up_regex(&args.path_pattern)?;
     let rayon_iterator = rayon_find_files(&args.path, &file_pattern_re);
 
-    match use_rayon(rayon_iterator, &args, false) {
+    match use_rayon(rayon_iterator, &file_pattern_re, false) {
         Err(err) => {
             eprintln!("Error on 'rayon_read_files': {:?}", err)
         }
@@ -76,39 +80,23 @@ pub fn rayon_read_files(args: Cli) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+#[inline]
 pub fn thread_per_file_read_files(args: Cli) -> Result<(), Box<dyn std::error::Error>> {
-    let file_pattern_re: Regex = match clean_up_regex(&args.path_pattern) {
-        Err(err) => {
-            panic!(
-                "Unable to accept pattern as valid regex: {} with err: {}",
-                args.path_pattern, err
-            );
-        }
-        Ok(re) => re,
-    };
-
+    let file_pattern_re = clean_up_regex(&args.path_pattern)?;
     let iterator = find_files(&args.path, &file_pattern_re);
-    use_thread_per_file(iterator, &args, false)?;
+    use_thread_per_file(iterator, &file_pattern_re, false)?;
 
     Ok(())
 }
 
+#[inline]
 pub fn threadpool_read_files(
     args: Cli,
     number_of_workers: usize,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let file_pattern_re: Regex = match clean_up_regex(&args.path_pattern) {
-        Err(err) => {
-            panic!(
-                "Unable to accept pattern as valid regex: {} with err: {}",
-                args.path_pattern, err
-            );
-        }
-        Ok(re) => re,
-    };
-
+    let file_pattern_re = clean_up_regex(&args.path_pattern)?;
     let iterator = find_files(&args.path, &file_pattern_re);
-    use_thread_pool(iterator, &args, false, number_of_workers)?;
+    use_thread_pool(iterator, &file_pattern_re, false, number_of_workers)?;
 
     Ok(())
 }
@@ -125,21 +113,20 @@ impl fmt::Display for FileInfo {
     }
 }
 
-fn clean_up_regex(pattern: &str) -> Result<regex::Regex, regex::Error> {
+fn clean_up_regex(pattern: &str) -> Result<regex::Regex, MyErrors> {
     let escaped = regex::escape(pattern);
     let replaced = escaped.replace("\\*", ".*").to_string();
-    Regex::new(replaced.as_str())
+    Regex::new(replaced.as_str()).map_err(MyErrors::Regex)
 }
 
 fn use_single_thread<I>(
     iterator: I,
-    args: &Cli,
+    re: &Regex,
     debug: bool,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
     I: Iterator<Item = Result<FileInfo, Box<dyn Error>>>,
 {
-    let string_pattern_re = clean_up_regex(&args.file_pattern)?;
     let results: Vec<(FileInfo, Vec<String>)> = iterator
         .filter_map(|item| match item {
             Ok(file) => Some(file),
@@ -149,7 +136,7 @@ where
             }
         })
         .filter_map(
-            |file| match find_entry_within_file(&file, &string_pattern_re) {
+            |file| match find_entry_within_file(&file, re) {
                 Err(err) => {
                     eprintln!("Error while searching file {}", err);
                     None
@@ -180,7 +167,7 @@ where
  */
 fn use_thread_per_file<I>(
     iterator: I,
-    args: &Cli,
+    re: &Regex,
     debug: bool,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
@@ -189,9 +176,9 @@ where
     let matched_paths = iterator.filter_map(|r| r.ok()).collect::<Vec<FileInfo>>();
 
     let mut handles = Vec::new();
-    let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
+    let re = Arc::new(re.to_owned());
     for file in matched_paths {
-        let re: Arc<Regex> = Arc::clone(&string_pattern_re);
+        let re: Arc<Regex> = Arc::clone(&re);
         let interal_file = file.clone();
         let handle: thread::JoinHandle<Vec<String>> =
             thread::spawn(move || match find_entry_within_file(&file, &re) {
@@ -224,7 +211,7 @@ where
 
 fn use_thread_pool<I>(
     iterator: I,
-    args: &Cli,
+    re: &Regex,
     debug: bool,
     number_of_workers: usize,
 ) -> Result<(), Box<dyn std::error::Error>>
@@ -235,12 +222,12 @@ where
 
     let number_of_jobs = matched_paths.len();
     let pool = ThreadPool::new(number_of_workers);
-    let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
+    let re = Arc::new(re.to_owned());
 
     let (tx, rx) = channel();
     for file in matched_paths {
         let tx = tx.clone();
-        let re: Arc<Regex> = Arc::clone(&string_pattern_re);
+        let re: Arc<Regex> = Arc::clone(&re);
         let internal_file = file.clone();
 
         pool.execute(move || match find_entry_within_file(&file, &re) {
@@ -273,12 +260,11 @@ where
     Ok(())
 }
 
-fn use_rayon<I>(iterator: I, args: &Cli, debug: bool) -> Result<(), Box<dyn Error + Send + Sync>>
+fn use_rayon<I>(iterator: I, re: &Regex, debug: bool) -> Result<(), Box<dyn Error + Send + Sync>>
 where
     I: ParallelIterator<Item = Result<FileInfo, Box<dyn Error + Send + Sync>>>,
 {
-    let string_pattern_re = Arc::new(clean_up_regex(&args.file_pattern)?);
-
+    let re = Arc::new(re.to_owned());
     let results: Vec<_> = iterator
         .filter_map(|item| match item {
             Ok(file) => Some(file),
@@ -288,7 +274,7 @@ where
             }
         })
         .map(|file| {
-            let re: Arc<Regex> = Arc::clone(&string_pattern_re);
+            let re: Arc<Regex> = Arc::clone(&re);
             let internal_file = file.clone();
 
             match find_entry_within_file(&file, &re) {
