@@ -4,7 +4,12 @@ This project is another Grep style program written is Rust.
 
 Purpose of this is primarily to function as a learning ground for Rust.
 
-NOTE: The currect project is not the final product. Given the nature of the project I will be making constant tweaks to improve the UX as well as attempting to correct/improve basic coding issues.
+Therefore currently there are several implementations of grep like function running on serial using a variety of:
+* single/multiple threads
+* threadpools (which varied "CPUs")
+* Popular threading library Rayon.
+
+NOTE: The current project is not the final product. Given the nature of the project I will be making constant tweaks to improve the UX as well as attempting to correct/improve basic coding issues.
 
 ## CLI
 

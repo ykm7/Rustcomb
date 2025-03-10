@@ -1,5 +1,6 @@
 use clap::Parser;
 use std::{error::Error, time::Instant};
+use wild::args_os;
 
 fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     println!("Args: {:?}", args);
@@ -14,6 +15,9 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
         start.elapsed()
     );
 
+    println!();
+    println!();
+
     let args_clone = args.clone();
     let start = Instant::now();
     rustcomb::thread_per_file_read_files(args_clone, print)?;
@@ -22,6 +26,9 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
         start.elapsed()
     );
 
+    println!();
+    println!();
+
     let args_clone = args.clone();
     let start = Instant::now();
     rustcomb::threadpool_read_files(args_clone, print, 1)?;
@@ -29,6 +36,9 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
         "Time taken for identifying files (use_thread_pool - 1 thread): {:?}",
         start.elapsed()
     );
+
+    println!();
+    println!();
 
     let args_clone = args.clone();
     let cpus = num_cpus::get();
@@ -39,6 +49,9 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
         cpus,
         start.elapsed()
     );
+
+    println!();
+    println!();
 
     let args_clone = args.clone();
     let start = Instant::now();
@@ -52,8 +65,8 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
 }
 
 fn main() {
-    let args = rustcomb::Cli::parse_from(wild::args_os());
-    if let Err(e) = setup(args, true) {
+    let cli = rustcomb::Cli::parse_from(args_os());
+    if let Err(e) = setup(cli, true) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
@@ -67,11 +80,10 @@ mod tests {
 
     #[test]
     fn test_setup() {
-        #[cfg(debug_assertions)]
         let args = vec!["Rustcomb", "*.txt", ".", "hello"];
-        let args = rustcomb::Cli::parse_from(args);
+        let cli = rustcomb::Cli::parse_from(args);
         // Use setup_with_args instead of setup to pass custom arguments
-        assert!(setup(args, true).is_ok());
+        assert!(setup(cli, true).is_ok());
     }
 
     // #[test]

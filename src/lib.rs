@@ -132,13 +132,12 @@ fn information_out(results: &Vec<(FileInfo, Vec<String>)>) {
         found_matches_count
     );
     for (f, r) in results {
-        // if !r.is_empty() {
         println!("Filename found with matches: {}", f);
         for m in r {
             println!("{}", m);
         }
-        // }
     }
+    println!();
 }
 
 fn use_single_thread<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
