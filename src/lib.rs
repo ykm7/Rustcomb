@@ -1,3 +1,4 @@
+use ansi_term::Colour::Red;
 use clap::Parser;
 use core::fmt;
 use rayon::prelude::*;
@@ -5,9 +6,10 @@ use regex::Regex;
 use std::error;
 use std::error::Error;
 use std::fs::File;
-use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::BufWriter;
+use std::io::{self, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -55,6 +57,16 @@ pub struct Cli {
 }
 
 impl std::fmt::Debug for Cli {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Path pattern: {}, Path: {:?}, File pattern: {}",
+            self.path_pattern, self.path, self.file_pattern
+        )
+    }
+}
+
+impl std::fmt::Display for Cli {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -127,17 +139,23 @@ fn clean_up_regex(pattern: &str) -> Result<regex::Regex, MyErrors> {
 
 fn information_out(results: &Vec<(FileInfo, Vec<String>)>) {
     let found_matches_count = results.len();
-    println!(
+
+    let stdout = io::stdout();
+    let lock = stdout.lock();
+    let mut handle = BufWriter::new(lock);
+
+    let _ = writeln!(
+        handle,
         "Found {} files which match file regex.",
         found_matches_count
     );
     for (f, r) in results {
-        println!("Filename found with matches: {}", f);
+        let _ = writeln!(handle, "Filename found with matches: {}", f);
         for m in r {
-            println!("{}", m);
+            let _ = writeln!(handle, "{}", m);
         }
     }
-    println!();
+    let _ = writeln!(handle);
 }
 
 fn use_single_thread<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
@@ -380,6 +398,10 @@ fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErr
     for (idx, line) in reader.lines().enumerate() {
         let line = line.map_err(MyErrors::FileIO)?;
         if re.is_match(&line) {
+            // Need to wrap this within the "print" for performance purposes.
+            let line = re.replace_all(&line, |caps: &regex::Captures| {
+                Red.paint(&caps[0]).to_string()
+            });
             found_lines.push(format!("Line {} - {}", idx + 1, line));
         }
     }
