@@ -1,141 +1,105 @@
-use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
+use std::sync::Arc;
+
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use rustcomb::{
     Cli, rayon_read_files, single_thread_read_files, thread_per_file_read_files,
     threadpool_read_files,
 };
 
-const PRINT: bool = false;
-
-fn benchmark_single_thread_read_files(c: &mut Criterion) {
-    let cli = Cli {
+lazy_static::lazy_static! {
+    static ref CLI_ARGS: Arc<Cli> = Arc::new(Cli {
         path_pattern: ".txt".to_string(),
         path: ".\\test_file_direction\\".into(),
         file_pattern: "test".to_string(),
-    };
+    });
+}
 
-    c.bench_function(
-        format!("'single_thread_read_files': {:?}\n", cli).as_str(),
-        |b| {
-            b.iter(|| {
-                let cli = Cli {
-                    path_pattern: ".txt".to_string(),
-                    path: ".\\test_file_direction\\".into(),
-                    file_pattern: "test".to_string(),
-                };
-                single_thread_read_files(black_box(cli), PRINT)
-            })
-        },
+const PRINT: bool = false;
+
+fn benchmark_single_thread_read_files(c: &mut Criterion) {
+    let cli = Arc::clone(&CLI_ARGS);
+    c.bench_with_input(
+        BenchmarkId::new(format!("single_thread_read_files_PRINT_{}", PRINT), &cli),
+        &cli,
+        |b, s| b.iter(|| single_thread_read_files(Arc::clone(s), PRINT)),
+    );
+    c.bench_with_input(
+        BenchmarkId::new(format!("single_thread_read_files_PRINT_{}", !PRINT), &cli),
+        &cli,
+        |b, s| b.iter(|| single_thread_read_files(Arc::clone(s), !PRINT)),
     );
 }
 
 fn benchmark_thread_per_file_read_files(c: &mut Criterion) {
-    let cli = Cli {
-        path_pattern: ".txt".to_string(),
-        path: ".\\test_file_direction\\".into(),
-        file_pattern: "test".to_string(),
-    };
-
-    c.bench_function(
-        format!("'thread_per_file_read_files': {:?}\n", cli).as_str(),
-        |b| {
-            b.iter(|| {
-                let cli = Cli {
-                    path_pattern: ".txt".to_string(),
-                    path: ".\\test_file_direction\\".into(),
-                    file_pattern: "test".to_string(),
-                };
-                thread_per_file_read_files(black_box(cli), PRINT)
-            })
-        },
+    let cli = Arc::clone(&CLI_ARGS);
+    c.bench_with_input(
+        BenchmarkId::new(format!("thread_per_file_read_files_PRINT_{}", PRINT), &cli),
+        &cli,
+        |b, s| b.iter(|| thread_per_file_read_files(Arc::clone(s), PRINT)),
+    );
+    c.bench_with_input(
+        BenchmarkId::new(format!("thread_per_file_read_files_PRINT_{}", !PRINT), &cli),
+        &cli,
+        |b, s| b.iter(|| thread_per_file_read_files(Arc::clone(s), !PRINT)),
     );
 }
 
 fn benchmark_use_thread_pool_1(c: &mut Criterion) {
-    let cli = Cli {
-        path_pattern: ".txt".to_string(),
-        path: ".\\test_file_direction\\".into(),
-        file_pattern: "test".to_string(),
-    };
-
-    // c.bench_function(
-    //     format!("'use_thread_pool - 1 thread': {:?}\n", cli).as_str(),
-    //     |b| {
-    //         b.iter(|| {
-    //             let cli = Cli {
-    //                 path_pattern: ".txt".to_string(),
-    //                 path: ".\\test_file_direction\\".into(),
-    //                 file_pattern: "test".to_string(),
-    //             };
-    //             threadpool_read_files(black_box(cli), PRINT, 1)
-    //         })
-    //     },
-    // );
-
+    let cli = Arc::clone(&CLI_ARGS);
     c.bench_with_input(
-        BenchmarkId::new(format!("'use_thread_pool_single_thread - PRINT: {}'\n", PRINT), &cli),
+        BenchmarkId::new(
+            format!("use_thread_pool_single_thread_PRINT_{}", PRINT),
+            &cli,
+        ),
         &cli,
-        |b, s| b.iter(|| threadpool_read_files(s.clone(), PRINT, 1)),
+        |b, s| b.iter(|| threadpool_read_files(Arc::clone(s), PRINT, 1)),
     );
 
     c.bench_with_input(
-        BenchmarkId::new(format!("'use_thread_pool_single_thread - PRINT: {}'\n", !PRINT), &cli),
+        BenchmarkId::new(
+            format!("use_thread_pool_single_thread_PRINT_{}", !PRINT),
+            &cli,
+        ),
         &cli,
-        |b, s| b.iter(|| threadpool_read_files(s.clone(), !PRINT, 1)),
+        |b, s| b.iter(|| threadpool_read_files(Arc::clone(s), !PRINT, 1)),
     );
 }
 
 fn benchmark_use_thread_pool_num_cpus_get(c: &mut Criterion) {
-    let cli = Cli {
-        path_pattern: ".txt".to_string(),
-        path: ".\\test_file_direction\\".into(),
-        file_pattern: "test".to_string(),
-    };
-
-    // c.bench_function(
-    //     format!("'use_thread_pool - {}': {:?}\n", num_cpus::get(), cli).as_str(),
-    //     |b| {
-    //         b.iter(|| {
-    //             let cli = Cli {
-    //                 path_pattern: ".txt".to_string(),
-    //                 path: ".\\test_file_direction\\".into(),
-    //                 file_pattern: "test".to_string(),
-    //             };
-    //             threadpool_read_files(black_box(cli), PRINT, num_cpus::get())
-    //         })
-    //     },
-    // );
-
+    let cli = Arc::clone(&CLI_ARGS);
     c.bench_with_input(
-        BenchmarkId::new(format!("'use_thread_pool - {} - PRINT: {}'\n", num_cpus::get(), PRINT), &cli),
+        BenchmarkId::new(
+            format!("use_thread_pool_{}_PRINT_{}", num_cpus::get(), PRINT),
+            &cli,
+        ),
         &cli,
-        |b, s| b.iter(|| threadpool_read_files(s.clone(), PRINT, num_cpus::get())),
+        |b, s| b.iter(|| threadpool_read_files(Arc::clone(s), PRINT, num_cpus::get())),
     );
 
     c.bench_with_input(
-        BenchmarkId::new(format!("'use_thread_pool - {} - PRINT: {}'\n", num_cpus::get(), !PRINT), &cli),
+        BenchmarkId::new(
+            format!("use_thread_pool_{}_PRINT_{}", num_cpus::get(), !PRINT),
+            &cli,
+        ),
         &cli,
-        |b, s| b.iter(|| threadpool_read_files(s.clone(), !PRINT, num_cpus::get())),
+        |b, s| b.iter(|| threadpool_read_files(Arc::clone(s), !PRINT, num_cpus::get())),
     );
 }
 
 fn benchmark_rayon_read_files(c: &mut Criterion) {
-    let cli = Cli {
-        path_pattern: ".txt".to_string(),
-        path: ".\\test_file_direction\\".into(),
-        file_pattern: "test".to_string(),
-    };
+    let cli = Arc::clone(&CLI_ARGS);
+    c.bench_with_input(
+        BenchmarkId::new(format!("rayon_read_files_PRINT_{}", PRINT), &cli),
+        &cli,
+        |b, s| b.iter(|| rayon_read_files(Arc::clone(s), PRINT)),
+    );
 
-    c.bench_function(format!("'rayon_read_files': {:?}\n", cli).as_str(), |b| {
-        b.iter(|| {
-            let cli = Cli {
-                path_pattern: ".txt".to_string(),
-                path: ".\\test_file_direction\\".into(),
-                file_pattern: "test".to_string(),
-            };
-            rayon_read_files(black_box(cli), false)
-        })
-    });
+    c.bench_with_input(
+        BenchmarkId::new(format!("rayon_read_files_PRINT_{}", !PRINT), &cli),
+        &cli,
+        |b, s| b.iter(|| rayon_read_files(Arc::clone(s), !PRINT)),
+    );
 }
 
 criterion_group!(

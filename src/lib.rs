@@ -45,25 +45,15 @@ impl error::Error for MyErrors {
     }
 }
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Debug)]
 #[clap(name = "Rustcomb")]
 pub struct Cli {
-    /// The pattern to look for
+    // The file name pattern to look for
     pub path_pattern: String,
-    /// The path to the file to read
+    // The path to the file to read
     pub path: std::path::PathBuf,
-
+    // The file pattern to look for
     pub file_pattern: String,
-}
-
-impl std::fmt::Debug for Cli {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Path pattern: {}, Path: {:?}, File pattern: {}",
-            self.path_pattern, self.path, self.file_pattern
-        )
-    }
 }
 
 impl std::fmt::Display for Cli {
@@ -77,7 +67,7 @@ impl std::fmt::Display for Cli {
 }
 
 #[inline]
-pub fn single_thread_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
+pub fn single_thread_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
     let path_pattern = clean_up_regex(&args.path_pattern)?;
     let iterator = find_files(&args.path, &path_pattern);
     let file_pattern_re = clean_up_regex(&args.file_pattern)?;
@@ -86,7 +76,7 @@ pub fn single_thread_read_files(args: Cli, print: bool) -> Result<(), MyErrors> 
 }
 
 #[inline]
-pub fn rayon_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
+pub fn rayon_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
     let path_pattern = clean_up_regex(&args.path_pattern)?;
     let rayon_iterator = rayon_find_files(&args.path, &path_pattern);
     let file_pattern_re = clean_up_regex(&args.file_pattern)?;
@@ -96,7 +86,7 @@ pub fn rayon_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
 }
 
 #[inline]
-pub fn thread_per_file_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
+pub fn thread_per_file_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
     let path_pattern = clean_up_regex(&args.path_pattern)?;
     let iterator = find_files(&args.path, &path_pattern);
     let file_pattern_re = clean_up_regex(&args.file_pattern)?;
@@ -107,7 +97,7 @@ pub fn thread_per_file_read_files(args: Cli, print: bool) -> Result<(), MyErrors
 
 #[inline]
 pub fn threadpool_read_files(
-    args: Cli,
+    args: Arc<Cli>,
     print: bool,
     number_of_workers: usize,
 ) -> Result<(), MyErrors> {
