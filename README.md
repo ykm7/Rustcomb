@@ -32,8 +32,7 @@ Benchmark all
 
 Benchmark particular one
 
-> cargo bench --bench my_benchmark rayon_read_files
-> cargo bench --bench my_benchmark rayon_read_files
+> cargo bench --bench my_benchmark rayon_read_files_PRINT
 
 _!Note_ the lack of "benchmark_" on the benchmark function name.
 

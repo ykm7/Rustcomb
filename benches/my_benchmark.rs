@@ -11,7 +11,7 @@ lazy_static::lazy_static! {
     static ref CLI_ARGS: Arc<Cli> = Arc::new(Cli {
         path_pattern: ".txt".to_string(),
         path: ".\\test_file_direction\\".into(),
-        file_pattern: "test".to_string(),
+        file_pattern: "asdfasdftest".to_string(),
     });
 }
 

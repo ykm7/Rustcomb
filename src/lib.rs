@@ -5,6 +5,7 @@ use rayon::prelude::*;
 use regex::Regex;
 use std::error;
 use std::error::Error;
+use std::fmt::Display;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -13,6 +14,8 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::Mutex;
+use std::sync::PoisonError;
 use std::sync::mpsc::channel;
 use std::thread;
 use threadpool::ThreadPool;
@@ -23,14 +26,16 @@ pub enum MyErrors {
     Regex(regex::Error),
     WalkDir(walkdir::Error),
     FileIO(io::Error),
+    LockError(String),
 }
 
 impl fmt::Display for MyErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match *self {
-            MyErrors::Regex(ref e) => write!(f, "regex error: ({}", e),
-            MyErrors::WalkDir(ref e) => write!(f, "WalkDir error: ({}", e),
-            MyErrors::FileIO(ref e) => write!(f, "File IO eror: ({}", e),
+            MyErrors::Regex(ref e) => write!(f, "regex error: ({})", e),
+            MyErrors::WalkDir(ref e) => write!(f, "WalkDir error: ({})", e),
+            MyErrors::FileIO(ref e) => write!(f, "File IO error: ({})", e),
+            MyErrors::LockError(ref e) => write!(f, "Lock error ({})", e),
         }
     }
 }
@@ -41,7 +46,17 @@ impl error::Error for MyErrors {
             MyErrors::Regex(ref e) => Some(e),
             MyErrors::WalkDir(ref e) => Some(e),
             MyErrors::FileIO(ref e) => Some(e),
+            MyErrors::LockError(_) => None,
         }
+    }
+}
+
+impl<T> From<PoisonError<T>> for MyErrors
+where
+    T: Display, // PoisonError<T> implements Display regardless of T
+{
+    fn from(err: PoisonError<T>) -> Self {
+        MyErrors::LockError(format!("Mutex/RwLock poisoned: {}", err))
     }
 }
 
@@ -294,7 +309,7 @@ where
             let re: Arc<Regex> = Arc::clone(&re);
             let internal_file = file.clone();
 
-            match find_entry_within_file(&file, &re) {
+            match find_entry_within_file_rayon(&file, &re) {
                 Err(err) => {
                     eprintln!("Error while searching file {}", err);
                     None
@@ -409,4 +424,41 @@ fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErr
     }
 
     Ok(found_lines)
+}
+
+fn find_entry_within_file_rayon(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
+    let file = File::open(&f.path).map_err(MyErrors::FileIO)?;
+    let reader = BufReader::new(file);
+    let res: Mutex<Vec<(_, _)>> = Mutex::new(Vec::new());
+
+    reader
+        .lines()
+        .enumerate()
+        .par_bridge()
+        .for_each(|(idx, line)| {
+            let line = match line.map_err(MyErrors::FileIO) {
+                Ok(line) => line,
+                Err(err) => {
+                    eprintln!("Error within rayon file opening {}", err);
+                    return;
+                }
+            };
+
+            let replaced = re.replace_all(&line, |caps: &regex::Captures| {
+                Colour::Red.paint(&caps[0]).to_string()
+            });
+
+            if replaced != line {
+                let mut guard = res.lock().unwrap_or_else(|e| e.into_inner());
+                guard.push((idx, format!("Line {} - {}", idx + 1, replaced)));
+            }
+        });
+
+    let mut sorted = res
+        .into_inner()
+        .map_err(|e| MyErrors::LockError(e.to_string()))?;
+    sorted.sort_by_key(|(idx, _)| *idx);
+
+    let results = sorted.into_iter().map(|(_, v)| v).collect::<Vec<_>>();
+    Ok(results)
 }
