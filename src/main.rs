@@ -1,3 +1,4 @@
+use ansi_term::Colour;
 use clap::Parser;
 use std::{error::Error, sync::Arc, time::Instant};
 use wild::args_os;
@@ -12,8 +13,11 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     let start = Instant::now();
     rustcomb::single_thread_read_files(Arc::clone(&cli), print)?;
     println!(
-        "Time taken for identifying files (single_thread_read_files): {:?}",
-        start.elapsed()
+        "{}",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (single_thread_read_files): {:?}",
+            start.elapsed()
+        ))
     );
 
     println!();
@@ -22,8 +26,11 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     let start = Instant::now();
     rustcomb::thread_per_file_read_files(Arc::clone(&cli), print)?;
     println!(
-        "Time taken for identifying files (use_thread_per_file): {:?}",
-        start.elapsed()
+        "{}",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (use_thread_per_file): {:?}",
+            start.elapsed()
+        ))
     );
 
     println!();
@@ -32,8 +39,11 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     let start = Instant::now();
     rustcomb::threadpool_read_files(Arc::clone(&cli), print, 1)?;
     println!(
-        "Time taken for identifying files (use_thread_pool - 1 thread): {:?}",
-        start.elapsed()
+        "{}",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (use_thread_pool - 1 thread): {:?}",
+            start.elapsed()
+        ))
     );
 
     println!();
@@ -43,9 +53,12 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     let start = Instant::now();
     rustcomb::threadpool_read_files(Arc::clone(&cli), print, cpus)?;
     println!(
-        "Time taken for identifying files (use_thread_pool - {} thread): {:?}",
-        cpus,
-        start.elapsed()
+        "{}",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (use_thread_pool - {} thread): {:?}",
+            cpus,
+            start.elapsed()
+        ))
     );
 
     println!();
@@ -54,8 +67,11 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     let start = Instant::now();
     rustcomb::rayon_read_files(Arc::clone(&cli), print)?;
     println!(
-        "Time taken for identifying files (rayon_read_files): {:?}",
-        start.elapsed()
+        "{}",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (rayon_read_files): {:?}",
+            start.elapsed()
+        ))
     );
 
     Ok(())

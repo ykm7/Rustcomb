@@ -1,4 +1,4 @@
-use ansi_term::Colour::Red;
+use ansi_term::Colour;
 use clap::Parser;
 use core::fmt;
 use rayon::prelude::*;
@@ -117,7 +117,8 @@ struct FileInfo {
 
 impl fmt::Display for FileInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Path: {:?}, Filename: {}", self.path, self.filename)
+        let filename = Colour::Green.paint(format!("{:?}", self.filename));
+        write!(f, "Path: {:?}, Filename: {}", self.path, filename)
     }
 }
 
@@ -127,25 +128,29 @@ fn clean_up_regex(pattern: &str) -> Result<regex::Regex, MyErrors> {
     Regex::new(replaced.as_str()).map_err(MyErrors::Regex)
 }
 
-fn information_out(results: &Vec<(FileInfo, Vec<String>)>) {
+fn information_out(results: &Vec<(FileInfo, Vec<String>)>) -> Result<(), MyErrors> {
     let found_matches_count = results.len();
 
     let stdout = io::stdout();
-    let lock = stdout.lock();
-    let mut handle = BufWriter::new(lock);
+    let mut handle = BufWriter::new(stdout);
 
-    let _ = writeln!(
-        handle,
-        "Found {} files which match file regex.",
+    let mut output = String::new();
+
+    output.push_str(&format!(
+        "Found {} file/s which match file regex.\n",
         found_matches_count
-    );
+    ));
     for (f, r) in results {
-        let _ = writeln!(handle, "Filename found with matches: {}", f);
+        output.push_str(&format!("Filename found with matches: {}\n", f));
         for m in r {
-            let _ = writeln!(handle, "{}", m);
+            output.push_str(&m.to_string());
+            output.push('\n');
         }
     }
-    let _ = writeln!(handle);
+    handle
+        .write_all(output.as_bytes())
+        .map_err(MyErrors::FileIO)?;
+    Ok(())
 }
 
 fn use_single_thread<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
@@ -176,7 +181,7 @@ where
         .collect();
 
     if print {
-        information_out(&results);
+        information_out(&results)?;
     }
 
     Ok(())
@@ -215,7 +220,7 @@ where
         .collect::<Vec<(FileInfo, _)>>();
 
     if print {
-        information_out(&results);
+        information_out(&results)?;
     }
 
     Ok(())
@@ -266,7 +271,7 @@ where
     pool.join();
 
     if print {
-        information_out(&results);
+        information_out(&results)?;
     }
 
     Ok(())
@@ -306,7 +311,7 @@ where
         .collect();
 
     if print {
-        information_out(&results);
+        information_out(&results)?;
     }
 
     Ok(())
@@ -380,6 +385,12 @@ fn rayon_find_files(
     iterator
 }
 
+/**
+ * Theres definitely room for improvement here.
+ * This is called by "all" the different functions and is entirely sequential not taking advantage of
+ * all concurrency/parallelism.
+ * TODO: either expand on this OR more likely make separate ones (in particular for Rayon)
+ */
 fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
     let file = File::open(&f.path).map_err(MyErrors::FileIO)?;
     let reader = BufReader::new(file);
@@ -387,12 +398,13 @@ fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErr
     let mut found_lines = Vec::new();
     for (idx, line) in reader.lines().enumerate() {
         let line = line.map_err(MyErrors::FileIO)?;
-        if re.is_match(&line) {
-            // Need to wrap this within the "print" for performance purposes.
-            let line = re.replace_all(&line, |caps: &regex::Captures| {
-                Red.paint(&caps[0]).to_string()
-            });
-            found_lines.push(format!("Line {} - {}", idx + 1, line));
+
+        let replaced = re.replace_all(&line, |caps: &regex::Captures| {
+            Colour::Red.paint(&caps[0]).to_string()
+        });
+
+        if replaced != line {
+            found_lines.push(format!("Line {} - {}", idx + 1, replaced));
         }
     }
 
