@@ -1,3 +1,4 @@
+use ansi_term::Colour;
 use clap::Parser;
 use core::fmt;
 use rayon::prelude::*;
@@ -5,9 +6,10 @@ use regex::Regex;
 use std::error;
 use std::error::Error;
 use std::fs::File;
-use std::io;
 use std::io::BufRead;
 use std::io::BufReader;
+use std::io::BufWriter;
+use std::io::{self, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -43,18 +45,18 @@ impl error::Error for MyErrors {
     }
 }
 
-#[derive(Parser, Clone)]
+#[derive(Parser, Clone, Debug)]
 #[clap(name = "Rustcomb")]
 pub struct Cli {
-    /// The pattern to look for
+    // The file name pattern to look for
     pub path_pattern: String,
-    /// The path to the file to read
+    // The path to the file to read
     pub path: std::path::PathBuf,
-
+    // The file pattern to look for
     pub file_pattern: String,
 }
 
-impl std::fmt::Debug for Cli {
+impl std::fmt::Display for Cli {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
@@ -65,7 +67,7 @@ impl std::fmt::Debug for Cli {
 }
 
 #[inline]
-pub fn single_thread_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
+pub fn single_thread_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
     let path_pattern = clean_up_regex(&args.path_pattern)?;
     let iterator = find_files(&args.path, &path_pattern);
     let file_pattern_re = clean_up_regex(&args.file_pattern)?;
@@ -74,7 +76,7 @@ pub fn single_thread_read_files(args: Cli, print: bool) -> Result<(), MyErrors> 
 }
 
 #[inline]
-pub fn rayon_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
+pub fn rayon_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
     let path_pattern = clean_up_regex(&args.path_pattern)?;
     let rayon_iterator = rayon_find_files(&args.path, &path_pattern);
     let file_pattern_re = clean_up_regex(&args.file_pattern)?;
@@ -84,7 +86,7 @@ pub fn rayon_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
 }
 
 #[inline]
-pub fn thread_per_file_read_files(args: Cli, print: bool) -> Result<(), MyErrors> {
+pub fn thread_per_file_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
     let path_pattern = clean_up_regex(&args.path_pattern)?;
     let iterator = find_files(&args.path, &path_pattern);
     let file_pattern_re = clean_up_regex(&args.file_pattern)?;
@@ -95,7 +97,7 @@ pub fn thread_per_file_read_files(args: Cli, print: bool) -> Result<(), MyErrors
 
 #[inline]
 pub fn threadpool_read_files(
-    args: Cli,
+    args: Arc<Cli>,
     print: bool,
     number_of_workers: usize,
 ) -> Result<(), MyErrors> {
@@ -115,7 +117,8 @@ struct FileInfo {
 
 impl fmt::Display for FileInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Path: {:?}, Filename: {}", self.path, self.filename)
+        let filename = Colour::Green.paint(format!("{:?}", self.filename));
+        write!(f, "Path: {:?}, Filename: {}", self.path, filename)
     }
 }
 
@@ -125,19 +128,29 @@ fn clean_up_regex(pattern: &str) -> Result<regex::Regex, MyErrors> {
     Regex::new(replaced.as_str()).map_err(MyErrors::Regex)
 }
 
-fn information_out(results: &Vec<(FileInfo, Vec<String>)>) {
+fn information_out(results: &Vec<(FileInfo, Vec<String>)>) -> Result<(), MyErrors> {
     let found_matches_count = results.len();
-    println!(
-        "Found {} files which match file regex.",
+
+    let stdout = io::stdout();
+    let mut handle = BufWriter::new(stdout);
+
+    let mut output = String::new();
+
+    output.push_str(&format!(
+        "Found {} file/s which match file regex.\n",
         found_matches_count
-    );
+    ));
     for (f, r) in results {
-        println!("Filename found with matches: {}", f);
+        output.push_str(&format!("Filename found with matches: {}\n", f));
         for m in r {
-            println!("{}", m);
+            output.push_str(&m.to_string());
+            output.push('\n');
         }
     }
-    println!();
+    handle
+        .write_all(output.as_bytes())
+        .map_err(MyErrors::FileIO)?;
+    Ok(())
 }
 
 fn use_single_thread<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
@@ -168,7 +181,7 @@ where
         .collect();
 
     if print {
-        information_out(&results);
+        information_out(&results)?;
     }
 
     Ok(())
@@ -207,7 +220,7 @@ where
         .collect::<Vec<(FileInfo, _)>>();
 
     if print {
-        information_out(&results);
+        information_out(&results)?;
     }
 
     Ok(())
@@ -258,7 +271,7 @@ where
     pool.join();
 
     if print {
-        information_out(&results);
+        information_out(&results)?;
     }
 
     Ok(())
@@ -298,7 +311,7 @@ where
         .collect();
 
     if print {
-        information_out(&results);
+        information_out(&results)?;
     }
 
     Ok(())
@@ -372,6 +385,12 @@ fn rayon_find_files(
     iterator
 }
 
+/**
+ * Theres definitely room for improvement here.
+ * This is called by "all" the different functions and is entirely sequential not taking advantage of
+ * all concurrency/parallelism.
+ * TODO: either expand on this OR more likely make separate ones (in particular for Rayon)
+ */
 fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
     let file = File::open(&f.path).map_err(MyErrors::FileIO)?;
     let reader = BufReader::new(file);
@@ -379,8 +398,13 @@ fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErr
     let mut found_lines = Vec::new();
     for (idx, line) in reader.lines().enumerate() {
         let line = line.map_err(MyErrors::FileIO)?;
-        if re.is_match(&line) {
-            found_lines.push(format!("Line {} - {}", idx + 1, line));
+
+        let replaced = re.replace_all(&line, |caps: &regex::Captures| {
+            Colour::Red.paint(&caps[0]).to_string()
+        });
+
+        if replaced != line {
+            found_lines.push(format!("Line {} - {}", idx + 1, replaced));
         }
     }
 
