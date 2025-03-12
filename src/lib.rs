@@ -1,3 +1,5 @@
+pub mod file_generations;
+
 use ansi_term::Colour;
 use clap::Parser;
 use core::fmt;

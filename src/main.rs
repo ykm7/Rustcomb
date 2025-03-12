@@ -3,6 +3,8 @@ use clap::Parser;
 use std::{error::Error, sync::Arc, time::Instant};
 use wild::args_os;
 
+mod file_generations;
+
 fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     println!("Args: {:?}", args);
     let cli = Arc::new(args);

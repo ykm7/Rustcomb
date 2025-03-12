@@ -20,6 +20,8 @@ General
 
 > cargo run --release .txt .\test_file_direction\ test
 
+> cargo run --release RUST_LOG=info .txt '.\test_file_direction\test_file copy 10.txt' pages
+
 ## Testing
 
 > cargo test

@@ -4,8 +4,9 @@ use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use rustcomb::{
     Cli, rayon_read_files, single_thread_read_files, thread_per_file_read_files,
-    threadpool_read_files,
+    threadpool_read_files
 };
+use rustcomb::file_generations;
 
 lazy_static::lazy_static! {
     static ref CLI_ARGS: Arc<Cli> = Arc::new(Cli {
