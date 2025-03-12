@@ -3,7 +3,7 @@ use dotenv::from_filename;
 
 mod file_generation;
 
-use file_generation::{create_files, FileType};
+use file_generation::{FileType, create_files};
 use std::collections::HashMap;
 
 use std::sync::Arc;
