@@ -29,6 +29,31 @@ General
 ## Benchmarking
 As part of my continued understanding of how Rust operations I have established benchmarks of all file retrieving and parsing
 
+A environment file should be supplied within the `benches` directory.
+
+```.env
+// Number of files to duplicate
+NUM_OF_FILES_TO_CREATE=10
+// Not currently used.
+NUM_OF_DIRECTORIES_TO_CREATE=0
+// the regex pattern to filter the files.
+PATH_PATTERN=".txt"
+// the regex pattern to find within the files.
+FILE_PATTERN="cubilia"
+// Enable printing of program output
+BENCH_PRINT_OUTPUT=false
+```
+
+### File generation
+Generated with: [Lorem Ipsum Generator](https://loremipsum.io/generator?n=10&t=p)
+
+#### Light
+10x paragraphs
+
+#### Light
+
+#### Light
+
 Benchmark all
 > cargo bench
 

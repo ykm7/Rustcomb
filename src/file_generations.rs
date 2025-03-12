@@ -50,29 +50,11 @@ pub fn create_files(
     let filename = file_to_duplicate.get_filename();
     let filename_path = file_to_duplicate.get_path();
 
-    println!(
-        "File path to duplicate (copy): {:?}",
-        filename_path.to_str().unwrap()
-    );
-
     for idx in 1..=num_of_files_to_create {
         temp.child(format!("{}_{}", idx, filename))
             .write_file(&filename_path)
             .unwrap();
     }
-
-    // temp.copy_from(source_dir, files_to_copy).unwrap();
-
-    println!(
-        "Temp directory path is: {:?}",
-        temp.path().to_str().unwrap()
-    );
-
-    // let input_file = temp.child("foo.txt");
-    // input_file.touch().unwrap();
-
-    // TODO: I think I need Drop trait so the calling function handles it?
-    // temp.close().unwrap();
 
     temp.path()
 }
@@ -100,7 +82,7 @@ mod tests {
         let num_of_files_to_duplicate = 5;
         let num_of_directories_to_duplicate = 1;
 
-        let temp_dir = assert_fs::TempDir::new().unwrap();
+        let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
         let p = create_files(
             &temp_dir,
             FileType::Light,
