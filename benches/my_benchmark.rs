@@ -13,10 +13,7 @@ use rustcomb::{
     threadpool_read_files,
 };
 
-const FILE_TO_DUPLICATE: FileType = FileType::Light;
-
 fn setup(temp_dir: &fixture::TempDir) -> (Arc<Cli>, bool) {
-    // Perform one-time setup here
     from_filename(".\\benches\\.env").ok();
 
     let envs = dotenv::vars().collect::<HashMap<String, String>>();
@@ -48,9 +45,25 @@ fn setup(temp_dir: &fixture::TempDir) -> (Arc<Cli>, bool) {
         .parse::<bool>()
         .unwrap();
 
+    let file_to_duplicate: FileType = envs
+        .get("FILE_TO_DUPLICATE")
+        .expect("Expect to find 'FILE_TO_DUPLICATE'")
+        .parse::<FileType>()
+        .unwrap();
+
+    // println!(
+    //     "Parameters:\nNum of files to create: {}\nNum of directories to create: {}\nFile pattern: {}\nFile content pattern: {}\nFile type to duplicate: {}\nPrint matches: {}",
+    //     num_of_files_to_create,
+    //     num_of_directories_to_create,
+    //     path_pattern,
+    //     file_pattern,
+    //     file_to_duplicate,
+    //     bench_print_output
+    // );
+
     let p = create_files(
         temp_dir,
-        FILE_TO_DUPLICATE,
+        file_to_duplicate,
         num_of_directories_to_create,
         num_of_files_to_create,
     );

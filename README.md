@@ -16,11 +16,9 @@ NOTE: The current project is not the final product. Given the nature of the proj
 https://crates.io/crates/wild
 
 General 
-> cargo run .txt .\test_file_direction\ test
+> cargo run [FILE_NAME_PATH_REGEX] [FILE_OR_DIRECTORY_TO_EXAMINE] [REGEX_WITHIN_FILE_TO_FIND]
 
-> cargo run --release .txt .\test_file_direction\ test
-
-> cargo run --release RUST_LOG=info .txt '.\test_file_direction\test_file copy 10.txt' pages
+> cargo run --release [FILE_NAME_PATH_REGEX] [FILE_OR_DIRECTORY_TO_EXAMINE] [REGEX_WITHIN_FILE_TO_FIND]
 
 ## Testing
 
@@ -42,6 +40,9 @@ PATH_PATTERN=".txt"
 FILE_PATTERN="cubilia"
 // Enable printing of program output
 BENCH_PRINT_OUTPUT=false
+// Required to be "light", "medium" or "heavy" (case-insensitive) 
+// This reflects the file type to be genererated in bulk per to the benchmark running against the files.
+FILE_TO_DUPLICATE=light
 ```
 
 ### File generation
@@ -50,9 +51,11 @@ Generated with: [Lorem Ipsum Generator](https://loremipsum.io/generator?n=10&t=p
 #### Light
 10x paragraphs
 
-#### Light
+#### Medium
+100x paragraphs
 
-#### Light
+#### Heavy
+1000x paragraphs
 
 Benchmark all
 > cargo bench

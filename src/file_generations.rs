@@ -1,7 +1,8 @@
 use assert_fs::{fixture, prelude::*};
 use std::{
-    env,
+    env, fmt,
     path::{Path, PathBuf},
+    str::FromStr,
 };
 
 const LIGHT_FILE: &str = "light_file.txt";
@@ -13,6 +14,32 @@ pub enum FileType {
     Light,
     Medium,
     Heavy,
+}
+
+impl fmt::Display for FileType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileType::Light => write!(f, "Light"),
+            FileType::Medium => write!(f, "Medium"),
+            FileType::Heavy => write!(f, "Heavy"),
+        }
+    }
+}
+
+impl FromStr for FileType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "light" => Ok(FileType::Light),
+            "medium" => Ok(FileType::Medium),
+            "heavy" => Ok(FileType::Heavy),
+            _ => Err(
+                "Not an expected conversion string. Required to be either [light, medium or heavy]"
+                    .to_string(),
+            ),
+        }
+    }
 }
 
 impl FileType {
