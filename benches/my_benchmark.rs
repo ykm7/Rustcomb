@@ -1,5 +1,9 @@
 extern crate dotenv;
 use dotenv::from_filename;
+
+mod file_generation;
+
+use file_generation::{create_files, FileType};
 use std::collections::HashMap;
 
 use std::sync::Arc;
@@ -7,7 +11,6 @@ use std::sync::Arc;
 use assert_fs::fixture;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
-use rustcomb::file_generations::{FileType, create_files};
 use rustcomb::{
     Cli, rayon_read_files, single_thread_read_files, thread_per_file_read_files,
     threadpool_read_files,

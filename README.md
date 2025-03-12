@@ -24,7 +24,7 @@ General
 
 > cargo test
 
-## Benchmarking
+## Benchmarking - [Criterion](https://bheisler.github.io/criterion.rs)
 As part of my continued understanding of how Rust operations I have established benchmarks of all file retrieving and parsing
 
 A environment file should be supplied within the `benches` directory.
@@ -60,7 +60,7 @@ Generated with: [Lorem Ipsum Generator](https://loremipsum.io/generator?n=10&t=p
 Benchmark all
 > cargo bench
 
-Benchmark particular one
+Example of how to benchmark particular one
 
 > cargo bench --bench my_benchmark rayon_read_files_PRINT
 
