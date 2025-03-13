@@ -124,16 +124,22 @@ pub fn threadpool_read_files(
     Ok(())
 }
 
-#[derive(Clone)]
 struct FileInfo {
     path: PathBuf,
     filename: String,
 }
 
+impl FileInfo {
+    fn get_identifier(&self) -> String {
+        format!("{}", &self)
+    }
+}
+
 impl fmt::Display for FileInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let filename = Colour::Green.paint(format!("{:?}", self.filename));
-        write!(f, "Path: {:?}, Filename: {}", self.path, filename)
+        let s = Colour::Green.paint(format!("{} {:?}", self.filename, self.path));
+        // let s = Style::new().bold().paint(format!("Path: {:?}, Filename: {}", self.path, filename));
+        write!(f, "{}", s)
     }
 }
 
@@ -143,14 +149,13 @@ fn clean_up_regex(pattern: &str) -> Result<regex::Regex, MyErrors> {
     Regex::new(replaced.as_str()).map_err(MyErrors::Regex)
 }
 
-fn information_out(results: &Vec<(FileInfo, Vec<String>)>) -> Result<(), MyErrors> {
+fn information_out(results: &Vec<(String, Vec<String>)>) -> Result<(), MyErrors> {
     let found_matches_count = results.len();
 
-    let stdout = io::stdout();
-    let mut handle = BufWriter::new(stdout);
-
+    let mut handle = BufWriter::new(io::stdout());
     let mut output = String::new();
 
+    output.push('\n');
     output.push_str(&format!(
         "Found {} file/s which match file regex.\n",
         found_matches_count
@@ -172,7 +177,7 @@ fn use_single_thread<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyEr
 where
     I: Iterator<Item = Result<FileInfo, MyErrors>>,
 {
-    let results: Vec<(FileInfo, Vec<String>)> = iterator
+    let results: Vec<(String, Vec<String>)> = iterator
         .filter_map(|item| match item {
             Ok(file) => Some(file),
             Err(err) => {
@@ -187,7 +192,7 @@ where
             }
             Ok(found) => {
                 if !found.is_empty() {
-                    Some((file, found))
+                    Some((file.get_identifier(), found))
                 } else {
                     None
                 }
@@ -215,7 +220,7 @@ where
     let re = Arc::new(re.to_owned());
     for file in matched_paths {
         let re: Arc<Regex> = Arc::clone(&re);
-        let interal_file = file.clone();
+        let file_id = file.get_identifier();
         let handle: thread::JoinHandle<Vec<String>> =
             thread::spawn(move || match find_entry_within_file(&file, &re) {
                 Err(err) => {
@@ -225,14 +230,14 @@ where
                 Ok(found) => found,
             });
 
-        handles.push((interal_file, handle));
+        handles.push((file_id, handle));
     }
 
     let results = handles
         .into_iter()
         .map(|f| (f.0, f.1.join().unwrap()))
         .filter(|result| !result.1.is_empty())
-        .collect::<Vec<(FileInfo, _)>>();
+        .collect::<Vec<(String, _)>>();
 
     if print {
         information_out(&results)?;
@@ -260,19 +265,16 @@ where
     for file in matched_paths {
         let tx = tx.clone();
         let re: Arc<Regex> = Arc::clone(&re);
-        let internal_file = file.clone();
-
+        let file_id = file.get_identifier();
         pool.execute(move || match find_entry_within_file(&file, &re) {
             Err(err) => {
                 eprintln!("Error while searching file {}", err);
-                tx.send((internal_file, Vec::new()))
+                tx.send((file_id, Vec::new()))
                     .expect("Critical error when handling error on file internal search");
             }
             Ok(found) => {
-                // if !found.is_empty() {
-                tx.send((internal_file, found))
+                tx.send((file_id, found))
                     .expect("Critical error while handling successful file internal searc");
-                // }
             }
         });
     }
@@ -307,8 +309,6 @@ where
         })
         .filter_map(|file| {
             let re: Arc<Regex> = Arc::clone(&re);
-            let internal_file = file.clone();
-
             match find_entry_within_file_rayon(&file, &re) {
                 Err(err) => {
                     eprintln!("Error while searching file {}", err);
@@ -316,7 +316,7 @@ where
                 }
                 Ok(found) => {
                     if !found.is_empty() {
-                        Some((internal_file, found))
+                        Some((file.get_identifier(), found))
                     } else {
                         None
                     }
@@ -333,7 +333,6 @@ where
 }
 
 fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = Result<FileInfo, MyErrors>> {
-    // let re_clone = re.clone();
     let iterator = WalkDir::new(dir).into_iter().filter_map(|entry| {
         let entry = match entry {
             Ok(e) => e,

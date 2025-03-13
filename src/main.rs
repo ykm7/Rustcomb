@@ -1,78 +1,117 @@
 use ansi_term::Colour;
 use clap::Parser;
-use std::{error::Error, sync::Arc, time::Instant};
+use std::{
+    error::Error,
+    io::{self, BufWriter, Write},
+    sync::Arc,
+    time::Instant,
+};
 use wild::args_os;
 
 fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     println!("Args: {:?}", args);
     let cli = Arc::new(args);
 
-    // let mut matched_paths: Vec<FileInfo> = Vec::new();
+    // let mut handle = BufWriter::new(io::stdout());
+    // let mut output = String::new();
 
-    // let args_clone = args.clone();
     let start = Instant::now();
     rustcomb::single_thread_read_files(Arc::clone(&cli), print)?;
+    let single_thread = start.elapsed();
     println!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (single_thread_read_files): {:?}",
-            start.elapsed()
+            single_thread
         ))
     );
 
-    println!();
-    println!();
-
     let start = Instant::now();
     rustcomb::thread_per_file_read_files(Arc::clone(&cli), print)?;
+    let thread_per_file_elapsed = start.elapsed();
     println!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (use_thread_per_file): {:?}",
-            start.elapsed()
+            thread_per_file_elapsed
         ))
     );
 
-    println!();
-    println!();
-
     let start = Instant::now();
     rustcomb::threadpool_read_files(Arc::clone(&cli), print, 1)?;
+    let threadpool_single_elapsed = start.elapsed();
     println!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (use_thread_pool - 1 thread): {:?}",
-            start.elapsed()
+            threadpool_single_elapsed
         ))
     );
-
-    println!();
-    println!();
 
     let cpus = num_cpus::get();
     let start = Instant::now();
     rustcomb::threadpool_read_files(Arc::clone(&cli), print, cpus)?;
+    let threadpool_multiple_elapsed = start.elapsed();
     println!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (use_thread_pool - {} thread): {:?}",
-            cpus,
-            start.elapsed()
+            cpus, threadpool_multiple_elapsed
         ))
     );
 
-    println!();
-    println!();
-
     let start = Instant::now();
     rustcomb::rayon_read_files(Arc::clone(&cli), print)?;
+    let rayon_elapsed = start.elapsed();
     println!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (rayon_read_files): {:?}",
-            start.elapsed()
+            rayon_elapsed
         ))
     );
+
+    let mut handle = BufWriter::new(io::stdout());
+    let mut output = String::new();
+
+    output.push('\n');
+    output.push_str(&format!(
+        "{}\n",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (single_thread_read_files): {:?}",
+            single_thread
+        ))
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (use_thread_per_file): {:?}",
+            thread_per_file_elapsed
+        ))
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (use_thread_pool - 1 thread): {:?}",
+            threadpool_single_elapsed
+        ))
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (use_thread_pool - {} thread): {:?}",
+            cpus, threadpool_multiple_elapsed
+        ))
+    ));
+    output.push_str(&format!(
+        "{}\n",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (rayon_read_files): {:?}",
+            rayon_elapsed
+        ))
+    ));
+
+    handle.write_all(output.as_bytes())?;
 
     Ok(())
 }
