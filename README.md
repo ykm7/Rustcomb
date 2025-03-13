@@ -78,7 +78,7 @@ _!Note_ the lack of "benchmark_" on the benchmark function name.
 ### Test/Bench resources
 Several hundred duplicate files are provided with inclusions of the "test" field for the purpose of the above testing and/or benchmarking.
 
-### CPU (TODO)
+### CPU
 
 Perf can be used with the below setup for WSL.
 
