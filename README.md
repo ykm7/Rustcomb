@@ -89,3 +89,9 @@ TODO: Require WSL to be running this "locally". -->
 ## Linting (Clippy)
 
 Clippy is [used](https://github.com/rust-lang/rust-clippy) to try to pick up addition issues/suggestions. Very handy while learning.
+
+## Misc
+
+### Crates
+
+[machete](https://crates.io/crates/cargo-machete/)

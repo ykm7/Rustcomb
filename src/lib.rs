@@ -1,8 +1,10 @@
 use ansi_term::Colour;
 use clap::Parser;
 use core::fmt;
+use lazy_static::lazy_static;
 use rayon::prelude::*;
 use regex::Regex;
+use std::borrow::Cow;
 use std::error;
 use std::error::Error;
 use std::fmt::Display;
@@ -26,6 +28,10 @@ pub enum MyErrors {
     WalkDir(walkdir::Error),
     FileIO(io::Error),
     LockError(String),
+}
+
+lazy_static! {
+    static ref STAR_PATTERN: Regex = Regex::new("\\*").unwrap();
 }
 
 impl fmt::Display for MyErrors {
@@ -142,9 +148,17 @@ impl fmt::Display for FileInfo {
     }
 }
 
+/**
+ * Use a single initialised re pattern to save it being created on each call (STAR_PATTERN)
+ *
+ * re.Replace() returns a COW (Copy on Write) type.
+ * So a new string is only created when its modified.
+ * Can be used whether using the Borrowed or the Owned
+ */
 fn clean_up_regex(pattern: &str) -> Result<regex::Regex, MyErrors> {
-    let cleaned = regex::escape(pattern).replace("\\*", ".*").to_string();
-    Regex::new(cleaned.as_str()).map_err(MyErrors::Regex)
+    let escaped = regex::escape(pattern);
+    let cleaned: std::borrow::Cow<'_, str> = STAR_PATTERN.replace(&escaped, ".*");
+    Regex::new(&cleaned).map_err(MyErrors::Regex)
 }
 
 fn information_out(results: &Vec<(String, Vec<String>)>) -> Result<(), MyErrors> {
@@ -264,6 +278,7 @@ where
         let tx = tx.clone();
         let re: Arc<Regex> = Arc::clone(&re);
         let file_id = file.get_identifier();
+
         pool.execute(move || match find_entry_within_file(&file, &re) {
             Err(err) => {
                 eprintln!("Error while searching file {}", err);
@@ -425,7 +440,7 @@ fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErr
 
 fn find_entry_within_file_rayon(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
     let file = File::open(&f.path).map_err(MyErrors::FileIO)?;
-    let reader = BufReader::new(file);
+    let reader = BufReader::with_capacity(8 * 1024, file);
 
     let mut results: Vec<(usize, String)> = reader
         .lines()
@@ -435,18 +450,17 @@ fn find_entry_within_file_rayon(f: &FileInfo, re: &Regex) -> Result<Vec<String>,
         .enumerate()
         .filter_map(|(idx, line)| {
             let replaced = re.replace_all(&line, |caps: &regex::Captures| {
-                Colour::Red.paint(&caps[0]).to_string()
+                let matched = &caps[0];
+                let coloured = Colour::Red.paint(matched);
+                coloured.to_string()
             });
 
-            // if replaced != line {
-            //     Some((idx, format!("Line {} - {}", idx + 1, replaced)))
-            // } else {
-            //     None
-            // }
-            // equivalent to: 
-            (replaced != line).then(|| (idx, format!("Line {} - {}", idx + 1, replaced)))
-
-            
+            // equivalent to:
+            if let Cow::Owned(_) = replaced {
+                Some((idx, format!("Line {} - {}", idx + 1, replaced)))
+            } else {
+                None
+            }
         })
         .collect();
 
