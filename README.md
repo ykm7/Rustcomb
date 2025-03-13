@@ -80,9 +80,17 @@ Several hundred duplicate files are provided with inclusions of the "test" field
 
 ### CPU (TODO)
 
-<!-- > perf record `target\release\rustcomb.exe .txt .\test_file_direction\ test` -- --profile-time 10
+Perf can be used with the below setup for WSL.
 
-TODO: Require WSL to be running this "locally". -->
+Example:
+> perf record cargo run --release *.txt test_files vel
+
+Or with benchmarks
+
+> perf record cargo bench --bench my_benchmark use_thread_pool_multiple
+
+View output
+> perf report
 
 ### Memory (TODO)
 
@@ -95,3 +103,58 @@ Clippy is [used](https://github.com/rust-lang/rust-clippy) to try to pick up add
 ### Crates
 
 [machete](https://crates.io/crates/cargo-machete/)
+
+## OS
+
+My current development environment is Windows, however using WSL (Ubuntu) to access linux profiling tools.
+
+### Ubuntu (WSL)
+
+> sudo apt  install rustup
+
+> rustup default stable 
+
+For a C linker
+> sudo apt install build-essential
+
+(Provide the `.env` within the benches directory)
+
+#### perf
+
+> sudo apt install linux-tools-common
+
+WSL error
+
+    WARNING: perf not found for kernel 5.15.167.4-microsoft
+
+    You may need to install the following packages for this specific kernel:
+        linux-tools-5.15.167.4-microsoft-standard-WSL2
+        linux-cloud-tools-5.15.167.4-microsoft-standard-WSL2
+
+    You may also want to install one of the following packages to keep up to date:
+        linux-tools-standard-WSL2
+        linux-cloud-tools-standard-WSL2
+
+> sudo apt install linux-tools-generic
+
+WSL2 uses a custom kernel so have to build our own `perf`.
+Although from what I am reading it makes sense that running perf within a VM may be limited.
+
+> https://stackoverflow.com/questions/60237123/is-there-any-method-to-run-perf-under-wsl
+
+Downloading the version manually from the above link.
+
+> wget "https://mirrors.edge.kernel.org/pub/linux/kernel/tools/perf/v6.9.0/perf-6.9.0.tar.gz"
+
+> tar xzf perf-6.9.0.tar.gz
+
+> cd linux-6.9/tools/perf
+
+> sudo apt install clang libcapstone-dev libtraceevent-dev libtracefs-dev
+
+> make -j$(nproc)
+
+Add the path shell config file (note, added to the beginning of the path is there is a default version which results in the above errors)
+Adding:
+
+`echo 'export PATH="$HOME/repos/tools/perf-6.9.0/tools/perf:$PATH"' >> ~/.bashrc`

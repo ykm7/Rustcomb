@@ -86,6 +86,7 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     output.push_str(&threadpool_multiple_elapsed_print.to_string());
     output.push('\n');
     output.push_str(&rayon_elapsed_print.to_string());
+    output.push('\n');
 
     handle.write_all(output.as_bytes())?;
 

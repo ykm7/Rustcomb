@@ -4,7 +4,7 @@ use dotenv::from_filename;
 mod file_generation;
 
 use file_generation::{FileType, create_files};
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use std::sync::Arc;
 
@@ -17,7 +17,7 @@ use rustcomb::{
 };
 
 fn setup(temp_dir: &fixture::TempDir) -> (Arc<Cli>, bool) {
-    from_filename(".\\benches\\.env").ok();
+    from_filename(Path::new("benches").join(".env")).ok();
 
     let envs = dotenv::vars().collect::<HashMap<String, String>>();
     let num_of_files_to_create = envs
