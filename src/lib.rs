@@ -14,7 +14,6 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::PoisonError;
 use std::sync::mpsc::channel;
 use std::thread;
@@ -144,9 +143,8 @@ impl fmt::Display for FileInfo {
 }
 
 fn clean_up_regex(pattern: &str) -> Result<regex::Regex, MyErrors> {
-    let escaped = regex::escape(pattern);
-    let replaced = escaped.replace("\\*", ".*").to_string();
-    Regex::new(replaced.as_str()).map_err(MyErrors::Regex)
+    let cleaned = regex::escape(pattern).replace("\\*", ".*").to_string();
+    Regex::new(cleaned.as_str()).map_err(MyErrors::Regex)
 }
 
 fn information_out(results: &Vec<(String, Vec<String>)>) -> Result<(), MyErrors> {
@@ -428,36 +426,30 @@ fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErr
 fn find_entry_within_file_rayon(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
     let file = File::open(&f.path).map_err(MyErrors::FileIO)?;
     let reader = BufReader::new(file);
-    let res: Mutex<Vec<(_, _)>> = Mutex::new(Vec::new());
 
-    reader
+    let mut results: Vec<(usize, String)> = reader
         .lines()
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(MyErrors::FileIO)?
+        .into_par_iter()
         .enumerate()
-        .par_bridge()
-        .for_each(|(idx, line)| {
-            let line = match line.map_err(MyErrors::FileIO) {
-                Ok(line) => line,
-                Err(err) => {
-                    eprintln!("Error within rayon file opening {}", err);
-                    return;
-                }
-            };
-
+        .filter_map(|(idx, line)| {
             let replaced = re.replace_all(&line, |caps: &regex::Captures| {
                 Colour::Red.paint(&caps[0]).to_string()
             });
 
-            if replaced != line {
-                let mut guard = res.lock().unwrap_or_else(|e| e.into_inner());
-                guard.push((idx, format!("Line {} - {}", idx + 1, replaced)));
-            }
-        });
+            // if replaced != line {
+            //     Some((idx, format!("Line {} - {}", idx + 1, replaced)))
+            // } else {
+            //     None
+            // }
+            // equivalent to: 
+            (replaced != line).then(|| (idx, format!("Line {} - {}", idx + 1, replaced)))
 
-    let mut sorted = res
-        .into_inner()
-        .map_err(|e| MyErrors::LockError(e.to_string()))?;
-    sorted.sort_by_key(|(idx, _)| *idx);
+            
+        })
+        .collect();
 
-    let results = sorted.into_iter().map(|(_, v)| v).collect::<Vec<_>>();
-    Ok(results)
+    results.par_sort_unstable_by_key(|(idx, _)| *idx);
+    Ok(results.into_iter().map(|(_, f)| f).collect())
 }

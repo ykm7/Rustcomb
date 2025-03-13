@@ -12,104 +12,80 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     println!("Args: {:?}", args);
     let cli = Arc::new(args);
 
-    // let mut handle = BufWriter::new(io::stdout());
-    // let mut output = String::new();
-
     let start = Instant::now();
     rustcomb::single_thread_read_files(Arc::clone(&cli), print)?;
     let single_thread = start.elapsed();
-    println!(
+    let single_thread_print = format!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (single_thread_read_files): {:?}",
             single_thread
         ))
     );
+    println!("{single_thread_print}");
 
     let start = Instant::now();
     rustcomb::thread_per_file_read_files(Arc::clone(&cli), print)?;
     let thread_per_file_elapsed = start.elapsed();
-    println!(
+    let thread_per_file_elapsed_print = format!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (use_thread_per_file): {:?}",
             thread_per_file_elapsed
         ))
     );
+    println!("{thread_per_file_elapsed_print}");
 
     let start = Instant::now();
     rustcomb::threadpool_read_files(Arc::clone(&cli), print, 1)?;
     let threadpool_single_elapsed = start.elapsed();
-    println!(
+    let threadpool_single_elapsed_print = format!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (use_thread_pool - 1 thread): {:?}",
             threadpool_single_elapsed
         ))
     );
+    println!("{threadpool_single_elapsed_print}");
 
     let cpus = num_cpus::get();
     let start = Instant::now();
     rustcomb::threadpool_read_files(Arc::clone(&cli), print, cpus)?;
     let threadpool_multiple_elapsed = start.elapsed();
-    println!(
+    let threadpool_multiple_elapsed_print = format!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (use_thread_pool - {} thread): {:?}",
             cpus, threadpool_multiple_elapsed
         ))
     );
+    println!("{threadpool_multiple_elapsed_print}");
 
     let start = Instant::now();
     rustcomb::rayon_read_files(Arc::clone(&cli), print)?;
     let rayon_elapsed = start.elapsed();
-    println!(
+    let rayon_elapsed_print = format!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (rayon_read_files): {:?}",
             rayon_elapsed
         ))
     );
+    println!("{rayon_elapsed_print}");
 
     let mut handle = BufWriter::new(io::stdout());
     let mut output = String::new();
 
     output.push('\n');
-    output.push_str(&format!(
-        "{}\n",
-        Colour::Green.paint(format!(
-            "Time taken for identifying files (single_thread_read_files): {:?}",
-            single_thread
-        ))
-    ));
-    output.push_str(&format!(
-        "{}\n",
-        Colour::Green.paint(format!(
-            "Time taken for identifying files (use_thread_per_file): {:?}",
-            thread_per_file_elapsed
-        ))
-    ));
-    output.push_str(&format!(
-        "{}\n",
-        Colour::Green.paint(format!(
-            "Time taken for identifying files (use_thread_pool - 1 thread): {:?}",
-            threadpool_single_elapsed
-        ))
-    ));
-    output.push_str(&format!(
-        "{}\n",
-        Colour::Green.paint(format!(
-            "Time taken for identifying files (use_thread_pool - {} thread): {:?}",
-            cpus, threadpool_multiple_elapsed
-        ))
-    ));
-    output.push_str(&format!(
-        "{}\n",
-        Colour::Green.paint(format!(
-            "Time taken for identifying files (rayon_read_files): {:?}",
-            rayon_elapsed
-        ))
-    ));
+    output.push_str(&single_thread_print.to_string());
+    output.push('\n');
+    output.push_str(&thread_per_file_elapsed_print.to_string());
+    output.push('\n');
+    output.push_str(&threadpool_single_elapsed_print.to_string());
+    output.push('\n');
+    output.push_str(&threadpool_multiple_elapsed_print.to_string());
+    output.push('\n');
+    output.push_str(&rayon_elapsed_print.to_string());
 
     handle.write_all(output.as_bytes())?;
 

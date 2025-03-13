@@ -8,6 +8,7 @@ Therefore currently there are several implementations of grep like function runn
 * single/multiple threads
 * threadpools (which varied "CPUs")
 * Popular threading library Rayon.
+* TODO Async 
 
 NOTE: The current project is not the final product. Given the nature of the project I will be making constant tweaks to improve the UX as well as attempting to correct/improve basic coding issues.
 
