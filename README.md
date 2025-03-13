@@ -61,9 +61,17 @@ Generated with: [Lorem Ipsum Generator](https://loremipsum.io/generator?n=10&t=p
 Benchmark all
 > cargo bench
 
-Example of how to benchmark particular one
+Available manual benches to benchmark particular one
 
-> cargo bench --bench my_benchmark rayon_read_files_PRINT
+> cargo bench --bench my_benchmark single_thread_read_files
+
+> cargo bench --bench my_benchmark thread_per_file_read_files
+
+> cargo bench --bench my_benchmark use_thread_pool_single_thread
+
+> cargo bench --bench my_benchmark use_thread_pool_multiple
+
+> cargo bench --bench my_benchmark rayon_read_files
 
 _!Note_ the lack of "benchmark_" on the benchmark function name.
 

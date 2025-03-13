@@ -129,14 +129,14 @@ fn benchmark_use_thread_pool_1(c: &mut Criterion) {
     temp_dir.close().unwrap();
 }
 
-fn benchmark_use_thread_pool_num_cpus_get(c: &mut Criterion) {
+fn benchmark_use_thread_pool_multiple_num_cpus_get(c: &mut Criterion) {
     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
     let (cli, bench_print_output) = setup(&temp_dir);
 
     c.bench_with_input(
         BenchmarkId::new(
             format!(
-                "use_thread_pool_{}_PRINT_{}",
+                "use_thread_pool_multiple_{}_PRINT_{}",
                 num_cpus::get(),
                 bench_print_output
             ),
@@ -170,7 +170,7 @@ criterion_group!(
     benchmark_single_thread_read_files,
     benchmark_thread_per_file_read_files,
     benchmark_use_thread_pool_1,
-    benchmark_use_thread_pool_num_cpus_get,
+    benchmark_use_thread_pool_multiple_num_cpus_get,
     benchmark_rayon_read_files
 );
 criterion_main!(benches);

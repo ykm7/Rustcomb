@@ -106,11 +106,11 @@ fn find_project_root() -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use walkdir::WalkDir;
-
     #[test]
     fn test_setup() {
+        use super::*;
+        use walkdir::WalkDir;
+
         let num_of_files_to_duplicate = 5;
         let num_of_directories_to_duplicate = 1;
 
