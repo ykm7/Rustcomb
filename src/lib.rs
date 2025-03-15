@@ -20,7 +20,6 @@ use std::sync::Arc;
 use std::sync::PoisonError;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
-use std::sync::mpsc::channel;
 use std::thread;
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
@@ -31,6 +30,7 @@ pub enum MyErrors {
     WalkDir(walkdir::Error),
     FileIO(io::Error),
     LockError(String),
+    ThreadPanic(String),
 }
 
 lazy_static! {
@@ -44,6 +44,7 @@ impl fmt::Display for MyErrors {
             MyErrors::WalkDir(ref e) => write!(f, "WalkDir error: ({})", e),
             MyErrors::FileIO(ref e) => write!(f, "File IO error: ({})", e),
             MyErrors::LockError(ref e) => write!(f, "Lock error ({})", e),
+            MyErrors::ThreadPanic(ref e) => write!(f, "thread error ({})", e),
         }
     }
 }
@@ -55,6 +56,7 @@ impl error::Error for MyErrors {
             MyErrors::WalkDir(ref e) => Some(e),
             MyErrors::FileIO(ref e) => Some(e),
             MyErrors::LockError(_) => None,
+            MyErrors::ThreadPanic(_) => None,
         }
     }
 }
@@ -192,33 +194,12 @@ fn information_out_each_lock(
     handle: &mut BufWriter<StdoutLock>,
     results: &(String, Vec<String>),
 ) -> Result<(), MyErrors> {
-    // let found_matches_count = results.len();
-
-    // let mut handle = BufWriter::new(io::stdout().lock());
-    // let mut output = String::new();
-
-    // output.push('\n');
-    // output.push_str(&format!(
-    //     "Found {} file/s which match file regex.\n",
-    //     found_matches_count
-    // ));
     let (file, r) = results;
-    writeln!(handle, "Filename found with matches: {}\n", file).map_err(MyErrors::FileIO)?; // .push_str(&format!("Filename found with matches: {}\n", file));
-    // for (f, r) in results {
-    // output.push_str(&format!("Filename found with matches: {}\n", f));
+    writeln!(handle, "Filename found with matches: {}", file).map_err(MyErrors::FileIO)?;
     for m in r {
-        // output.push_str(&m.to_string());
-        // output.push('\n');
         writeln!(handle, "{}", m).map_err(MyErrors::FileIO)?;
     }
-    // }
-    // handle
-    //     .write_all(output.as_bytes())
-    //     .map_err(MyErrors::FileIO)?;
-
-    // write!(handle, "{}", output).map_err(MyErrors::FileIO)?;
-    // handle.flush().map_err(MyErrors::FileIO)?;
-
+    // periodic flushing.
     if handle.buffer().len() > 8 * 1024 {
         handle.flush().map_err(MyErrors::FileIO)?;
     }
@@ -305,32 +286,36 @@ where
     let re = Arc::new(re.to_owned());
 
     let (tx, rx) = crossbeam_channel::bounded(1000);
-    // let job_count = AtomicUsize::new(0);
+    let files_found_matching_file_regex = Arc::new(AtomicUsize::new(0));
 
-    let print_handle = thread::spawn(move || {
+    let print_handle = thread::spawn(move || -> Result<_, MyErrors> {
         let stdout = io::stdout();
-        let mut handle = BufWriter::with_capacity(1_048_576, stdout.lock());  // 1MB buffer
+        let mut handle = BufWriter::with_capacity(1_048_576, stdout.lock()); // 1MB buffer
+        if print {
+            writeln!(handle).map_err(MyErrors::FileIO)?;
+        }
 
         while let Ok(x) = rx.recv() {
-            if let Err(err) = information_out_each_lock(&mut handle, &x) {
-                eprintln!("Error printing: {}", err)
+            // TODO: Investigate the "Ordering" stuff more.
+            files_found_matching_file_regex.fetch_add(1, Ordering::Relaxed);
+            if print {
+                information_out_each_lock(&mut handle, &x)?;
             }
         }
 
-        // rx.iter()
-        //     .filter(|x: &(String, Vec<String>)| {
-        //         !x.1.is_empty()
-        //         // !found.is_empty()
-        //     })
-        //     .for_each(|x| match information_out_each_lock(&x) {
-        //         Ok(_) => (),
-        //         Err(err) => eprintln!("Error printing: {}", err),
-        //     })
+        if print {
+            writeln!(
+                handle,
+                "Found {} files",
+                files_found_matching_file_regex.load(Ordering::Relaxed)
+            )
+            .map_err(MyErrors::FileIO)?;
+        }
+        handle.flush().map_err(MyErrors::FileIO)?;
+        Ok(())
     });
 
     iterator.for_each(|file| {
-        // job_count.fetch_add(1, Ordering::Relaxed);
-
         let tx: crossbeam_channel::Sender<(String, Vec<String>)> = tx.clone();
         let re: Arc<Regex> = Arc::clone(&re);
         let file_id = file.get_identifier();
@@ -342,7 +327,7 @@ where
             Ok(found) => {
                 if !found.is_empty() {
                     if let Err(e) = tx.send((file_id, found)) {
-                        eprint!(
+                        eprintln!(
                             "Critical error while handling successful file internal search: {}",
                             e
                         )
@@ -352,26 +337,11 @@ where
         });
     });
 
-    // pool.execute(|| {
-    //     rx
-    //     .iter()
-    //     .for_each(|x| {
-    //         match information_out_each_lock(&x) {
-    //             Ok(_) => (),
-    //             Err(err) => eprintln!("Error printing: {}", err)
-    //         }
-    //     });
-    // });
-
     drop(tx);
-    print_handle.join().expect("Shouldn't error");
+    print_handle
+        .join()
+        .map_err(|err| MyErrors::ThreadPanic(format!("{:?}", err)))??;
     pool.join();
-
-    // let results: Vec<_> = rx.iter().collect();
-
-    // if print {
-    //     information_out(&results)?;
-    // }
 
     Ok(())
 }
