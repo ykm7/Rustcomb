@@ -24,6 +24,15 @@ use std::thread;
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
+/**
+ * Based on various suggestions - Matches common filesystem block sizes
+ */
+const FLUSH_THRESHOLD: usize = 64 * 1024; // 64KB
+/**
+ * Fits in L2 cache (most modern CPUs)
+ */
+const BUF_CAPACITY: usize = 256 * 1024; // 256KB
+
 #[derive(Debug)]
 pub enum MyErrors {
     Regex(regex::Error),
@@ -200,7 +209,7 @@ fn information_out_each_lock(
         writeln!(handle, "{}", m).map_err(MyErrors::FileIO)?;
     }
     // periodic flushing.
-    if handle.buffer().len() > 8 * 1024 {
+    if handle.buffer().len() > FLUSH_THRESHOLD {
         handle.flush().map_err(MyErrors::FileIO)?;
     }
 
@@ -290,7 +299,7 @@ where
 
     let print_handle = thread::spawn(move || -> Result<_, MyErrors> {
         let stdout = io::stdout();
-        let mut handle = BufWriter::with_capacity(1_048_576, stdout.lock()); // 1MB buffer
+        let mut handle = BufWriter::with_capacity(BUF_CAPACITY, stdout.lock()); // 1MB buffer
         if print {
             writeln!(handle).map_err(MyErrors::FileIO)?;
         }
