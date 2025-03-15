@@ -112,7 +112,7 @@ mod tests {
         let args = vec![
             "Rustcomb",
             "*.txt",
-            ".\\test_files",
+            "test_files",
             "metus mus. Elit convallis",
         ];
         let cli = rustcomb::Cli::parse_from(args);
