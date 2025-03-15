@@ -92,6 +92,15 @@ Or with benchmarks
 View output
 > perf report
 
+For all the benchmarks for comparision
+
+    perf record -o single_thread_read_files.data cargo bench --bench my_benchmark single_thread_read_files &&
+    perf record -o thread_per_file_read_files.data cargo bench --bench my_benchmark thread_per_file_read_files &&
+    perf record -o use_thread_pool_single_thread.data cargo bench --bench my_benchmark use_thread_pool_single_thread &&
+    perf record -o use_thread_pool_multiple.data cargo bench --bench my_benchmark use_thread_pool_multiple &&
+    perf record -o rayon_read_files.data cargo bench --bench my_benchmark rayon_read_files
+
+
 ### Memory (TODO)
 
 ## Linting (Clippy)
