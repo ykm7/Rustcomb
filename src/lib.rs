@@ -12,11 +12,14 @@ use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
 use std::io::BufWriter;
+use std::io::StdoutLock;
 use std::io::{self, Write};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::PoisonError;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 use std::sync::mpsc::channel;
 use std::thread;
 use threadpool::ThreadPool;
@@ -185,18 +188,49 @@ fn information_out(results: &Vec<(String, Vec<String>)>) -> Result<(), MyErrors>
     Ok(())
 }
 
+fn information_out_each_lock(
+    handle: &mut BufWriter<StdoutLock>,
+    results: &(String, Vec<String>),
+) -> Result<(), MyErrors> {
+    // let found_matches_count = results.len();
+
+    // let mut handle = BufWriter::new(io::stdout().lock());
+    // let mut output = String::new();
+
+    // output.push('\n');
+    // output.push_str(&format!(
+    //     "Found {} file/s which match file regex.\n",
+    //     found_matches_count
+    // ));
+    let (file, r) = results;
+    writeln!(handle, "Filename found with matches: {}\n", file).map_err(MyErrors::FileIO)?; // .push_str(&format!("Filename found with matches: {}\n", file));
+    // for (f, r) in results {
+    // output.push_str(&format!("Filename found with matches: {}\n", f));
+    for m in r {
+        // output.push_str(&m.to_string());
+        // output.push('\n');
+        writeln!(handle, "{}", m).map_err(MyErrors::FileIO)?;
+    }
+    // }
+    // handle
+    //     .write_all(output.as_bytes())
+    //     .map_err(MyErrors::FileIO)?;
+
+    // write!(handle, "{}", output).map_err(MyErrors::FileIO)?;
+    // handle.flush().map_err(MyErrors::FileIO)?;
+
+    if handle.buffer().len() > 8 * 1024 {
+        handle.flush().map_err(MyErrors::FileIO)?;
+    }
+
+    Ok(())
+}
+
 fn use_single_thread<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
 where
-    I: Iterator<Item = Result<FileInfo, MyErrors>>,
+    I: Iterator<Item = FileInfo>,
 {
     let results: Vec<(String, Vec<String>)> = iterator
-        .filter_map(|item| match item {
-            Ok(file) => Some(file),
-            Err(err) => {
-                eprintln!("Error parsing item: {}", err);
-                None
-            }
-        })
         .filter_map(|file| match find_entry_within_file(&file, re) {
             Err(err) => {
                 eprintln!("Error while searching file {}", err);
@@ -224,9 +258,9 @@ where
  */
 fn use_thread_per_file<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
 where
-    I: Iterator<Item = Result<FileInfo, MyErrors>>,
+    I: Iterator<Item = FileInfo>,
 {
-    let matched_paths = iterator.filter_map(|r| r.ok()).collect::<Vec<FileInfo>>();
+    let matched_paths = iterator.collect::<Vec<FileInfo>>();
 
     let mut handles = Vec::new();
     let re = Arc::new(re.to_owned());
@@ -265,44 +299,79 @@ fn use_thread_pool<I>(
     number_of_workers: usize,
 ) -> Result<(), MyErrors>
 where
-    I: Iterator<Item = Result<FileInfo, MyErrors>>,
+    I: Iterator<Item = FileInfo>,
 {
-    let matched_paths = iterator.filter_map(|r| r.ok()).collect::<Vec<FileInfo>>();
-
-    let number_of_jobs = matched_paths.len();
     let pool = ThreadPool::new(number_of_workers);
     let re = Arc::new(re.to_owned());
 
-    let (tx, rx) = channel();
-    for file in matched_paths {
-        let tx = tx.clone();
+    let (tx, rx) = crossbeam_channel::bounded(1000);
+    // let job_count = AtomicUsize::new(0);
+
+    let print_handle = thread::spawn(move || {
+        let stdout = io::stdout();
+        let mut handle = BufWriter::with_capacity(1_048_576, stdout.lock());  // 1MB buffer
+
+        while let Ok(x) = rx.recv() {
+            if let Err(err) = information_out_each_lock(&mut handle, &x) {
+                eprintln!("Error printing: {}", err)
+            }
+        }
+
+        // rx.iter()
+        //     .filter(|x: &(String, Vec<String>)| {
+        //         !x.1.is_empty()
+        //         // !found.is_empty()
+        //     })
+        //     .for_each(|x| match information_out_each_lock(&x) {
+        //         Ok(_) => (),
+        //         Err(err) => eprintln!("Error printing: {}", err),
+        //     })
+    });
+
+    iterator.for_each(|file| {
+        // job_count.fetch_add(1, Ordering::Relaxed);
+
+        let tx: crossbeam_channel::Sender<(String, Vec<String>)> = tx.clone();
         let re: Arc<Regex> = Arc::clone(&re);
         let file_id = file.get_identifier();
 
         pool.execute(move || match find_entry_within_file(&file, &re) {
             Err(err) => {
                 eprintln!("Error while searching file {}", err);
-                tx.send((file_id, Vec::new()))
-                    .expect("Critical error when handling error on file internal search");
             }
             Ok(found) => {
-                tx.send((file_id, found))
-                    .expect("Critical error while handling successful file internal searc");
+                if !found.is_empty() {
+                    if let Err(e) = tx.send((file_id, found)) {
+                        eprint!(
+                            "Critical error while handling successful file internal search: {}",
+                            e
+                        )
+                    }
+                }
             }
         });
-    }
-    drop(tx);
+    });
 
-    let results: Vec<_> = rx
-        .iter()
-        .take(number_of_jobs)
-        .filter(|results| !results.1.is_empty())
-        .collect();
+    // pool.execute(|| {
+    //     rx
+    //     .iter()
+    //     .for_each(|x| {
+    //         match information_out_each_lock(&x) {
+    //             Ok(_) => (),
+    //             Err(err) => eprintln!("Error printing: {}", err)
+    //         }
+    //     });
+    // });
+
+    drop(tx);
+    print_handle.join().expect("Shouldn't error");
     pool.join();
 
-    if print {
-        information_out(&results)?;
-    }
+    // let results: Vec<_> = rx.iter().collect();
+
+    // if print {
+    //     information_out(&results)?;
+    // }
 
     Ok(())
 }
@@ -345,11 +414,15 @@ where
     Ok(())
 }
 
-fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = Result<FileInfo, MyErrors>> {
+fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = FileInfo> {
     let iterator = WalkDir::new(dir).into_iter().filter_map(|entry| {
         let entry = match entry {
             Ok(e) => e,
-            Err(err) => return Some(Err(MyErrors::WalkDir(err))),
+            Err(err) => {
+                eprintln!("File/Dir error: {}", err);
+                // Some(Err(MyErrors::WalkDir(err)));
+                return None;
+            }
         };
 
         if !entry.file_type().is_file() {
@@ -362,10 +435,10 @@ fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = Result<FileInfo, M
         match filename {
             Some(filename) => {
                 if re.is_match(filename) {
-                    Some(Ok(FileInfo {
+                    Some(FileInfo {
                         path: path.to_path_buf(),
                         filename: filename.to_string(),
-                    }))
+                    })
                 } else {
                     None
                 }
@@ -430,7 +503,7 @@ fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErr
             Colour::Red.paint(&caps[0]).to_string()
         });
 
-        if replaced != line {
+        if let Cow::Owned(_) = replaced {
             found_lines.push(format!("Line {} - {}", idx + 1, replaced));
         }
     }
