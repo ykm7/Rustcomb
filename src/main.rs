@@ -109,7 +109,12 @@ mod tests {
 
     #[test]
     fn test_setup() {
-        let args = vec!["Rustcomb", "*.txt", ".", "hello"];
+        let args = vec![
+            "Rustcomb",
+            "*.txt",
+            ".\\test_files",
+            "metus mus. Elit convallis",
+        ];
         let cli = rustcomb::Cli::parse_from(args);
         // Use setup_with_args instead of setup to pass custom arguments
         assert!(setup(cli, true).is_ok());
