@@ -40,6 +40,7 @@ pub enum MyErrors {
     FileIO(io::Error),
     LockError(String),
     ThreadPanic(String),
+    SomeError(String),
 }
 
 lazy_static! {
@@ -54,6 +55,7 @@ impl fmt::Display for MyErrors {
             MyErrors::FileIO(ref e) => write!(f, "File IO error: ({})", e),
             MyErrors::LockError(ref e) => write!(f, "Lock error ({})", e),
             MyErrors::ThreadPanic(ref e) => write!(f, "thread error ({})", e),
+            MyErrors::SomeError(ref e) => write!(f, "value expected to be not None ({})", e),
         }
     }
 }
@@ -66,6 +68,7 @@ impl error::Error for MyErrors {
             MyErrors::FileIO(ref e) => Some(e),
             MyErrors::LockError(_) => None,
             MyErrors::ThreadPanic(_) => None,
+            MyErrors::SomeError(_) => None,
         }
     }
 }
@@ -82,38 +85,42 @@ where
 #[derive(Parser, Clone, Debug)]
 #[clap(name = "Rustcomb")]
 pub struct Cli {
-    // The file name pattern to look for
-    pub path_pattern: String,
     // The path to the file to read
     pub path: std::path::PathBuf,
     // The file pattern to look for
     pub file_pattern: String,
+    // The file name pattern to look for
+    pub path_pattern: Option<String>,
 }
 
 impl std::fmt::Display for Cli {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Path pattern: {}, Path: {:?}, File pattern: {}",
-            self.path_pattern, self.path, self.file_pattern
+            "Path: {:?}, File pattern: {}, Path pattern: {:?}",
+            self.path, self.file_pattern, self.path_pattern
         )
     }
 }
 
 #[inline]
 pub fn single_thread_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
-    let path_pattern = clean_up_regex(&args.path_pattern)?;
-    let iterator = find_files(&args.path, &path_pattern);
-    let file_pattern_re = clean_up_regex(&args.file_pattern)?;
+    let path_pattern = clean_up_regex(args.path_pattern.as_deref())?;
+    let iterator = find_files(&args.path, path_pattern);
+    let file_pattern_re = clean_up_regex(Some(&args.file_pattern))?.ok_or(MyErrors::SomeError(
+        "'file_pattern' is expected to exist".to_string(),
+    ))?;
     use_single_thread(iterator, &file_pattern_re, print)?;
     Ok(())
 }
 
 #[inline]
 pub fn rayon_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
-    let path_pattern = clean_up_regex(&args.path_pattern)?;
-    let rayon_iterator = rayon_find_files(&args.path, &path_pattern);
-    let file_pattern_re = clean_up_regex(&args.file_pattern)?;
+    let path_pattern = clean_up_regex(args.path_pattern.as_deref())?;
+    let rayon_iterator = rayon_find_files(&args.path, path_pattern);
+    let file_pattern_re = clean_up_regex(Some(&args.file_pattern))?.ok_or(MyErrors::SomeError(
+        "'file_pattern' is expected to exist".to_string(),
+    ))?;
     use_rayon(rayon_iterator, &file_pattern_re, print)?;
 
     Ok(())
@@ -121,9 +128,11 @@ pub fn rayon_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
 
 #[inline]
 pub fn thread_per_file_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
-    let path_pattern = clean_up_regex(&args.path_pattern)?;
-    let iterator = find_files(&args.path, &path_pattern);
-    let file_pattern_re = clean_up_regex(&args.file_pattern)?;
+    let path_pattern = clean_up_regex(args.path_pattern.as_deref())?;
+    let iterator = find_files(&args.path, path_pattern);
+    let file_pattern_re = clean_up_regex(Some(&args.file_pattern))?.ok_or(MyErrors::SomeError(
+        "'file_pattern' is expected to exist".to_string(),
+    ))?;
     use_thread_per_file(iterator, &file_pattern_re, print)?;
 
     Ok(())
@@ -135,9 +144,11 @@ pub fn threadpool_read_files(
     print: bool,
     number_of_workers: usize,
 ) -> Result<(), MyErrors> {
-    let path_pattern = clean_up_regex(&args.path_pattern)?;
-    let iterator = find_files(&args.path, &path_pattern);
-    let file_pattern_re = clean_up_regex(&args.file_pattern)?;
+    let path_pattern = clean_up_regex(args.path_pattern.as_deref())?;
+    let iterator = find_files(&args.path, path_pattern);
+    let file_pattern_re = clean_up_regex(Some(&args.file_pattern))?.ok_or(MyErrors::SomeError(
+        "'file_pattern' is expected to exist".to_string(),
+    ))?;
     use_thread_pool(iterator, &file_pattern_re, print, number_of_workers)?;
 
     Ok(())
@@ -169,10 +180,14 @@ impl fmt::Display for FileInfo {
  * So a new string is only created when its modified.
  * Can be used whether using the Borrowed or the Owned
  */
-fn clean_up_regex(pattern: &str) -> Result<regex::Regex, MyErrors> {
-    let escaped = regex::escape(pattern);
-    let cleaned: std::borrow::Cow<'_, str> = STAR_PATTERN.replace(&escaped, ".*");
-    Regex::new(&cleaned).map_err(MyErrors::Regex)
+fn clean_up_regex(pattern: Option<&str>) -> Result<Option<regex::Regex>, MyErrors> {
+    pattern
+        .map(|pat| {
+            let escaped = regex::escape(pat);
+            let cleaned: std::borrow::Cow<'_, str> = STAR_PATTERN.replace(&escaped, ".*");
+            Regex::new(&cleaned).map_err(MyErrors::Regex)
+        })
+        .transpose()
 }
 
 fn information_out(results: &Vec<(String, Vec<String>)>) -> Result<(), MyErrors> {
@@ -182,10 +197,7 @@ fn information_out(results: &Vec<(String, Vec<String>)>) -> Result<(), MyErrors>
     let mut output = String::new();
 
     output.push('\n');
-    output.push_str(&format!(
-        "Found {} file/s which match file regex.\n",
-        found_matches_count
-    ));
+    output.push_str(&format!("Found {} files\n", found_matches_count));
     for (f, r) in results {
         output.push_str(&format!("Filename found with matches: {}\n", f));
         for m in r {
@@ -393,8 +405,10 @@ where
     Ok(())
 }
 
-fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = FileInfo> {
-    let iterator = WalkDir::new(dir).into_iter().filter_map(|entry| {
+fn find_files(dir: &Path, re: Option<Regex>) -> impl Iterator<Item = FileInfo> {
+    let iterator = WalkDir::new(dir)
+    .into_iter()
+    .filter_map(move |entry| {
         let entry = match entry {
             Ok(e) => e,
             Err(err) => {
@@ -413,13 +427,20 @@ fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = FileInfo> {
 
         match filename {
             Some(filename) => {
-                if re.is_match(filename) {
+                if let Some(re) = &re {
+                    if re.is_match(filename) {
+                        Some(FileInfo {
+                            path: path.to_path_buf(),
+                            filename: filename.to_string(),
+                        })
+                    } else {
+                        None
+                    }
+                } else {
                     Some(FileInfo {
                         path: path.to_path_buf(),
                         filename: filename.to_string(),
                     })
-                } else {
-                    None
                 }
             }
             None => None,
@@ -430,7 +451,7 @@ fn find_files(dir: &Path, re: &Regex) -> impl Iterator<Item = FileInfo> {
 
 fn rayon_find_files(
     dir: &Path,
-    re: &Regex,
+    re: Option<Regex>,
 ) -> impl ParallelIterator<Item = Result<FileInfo, MyErrors>> {
     let iterator = WalkDir::new(dir)
         .into_iter()
@@ -443,18 +464,25 @@ fn rayon_find_files(
                 None
             }
         })
-        .filter_map(|entry| {
+        .filter_map(move |entry| {
             let path = entry.path();
             let filename = path.file_name().and_then(|os_str| os_str.to_str());
             match filename {
                 Some(filename) => {
-                    if re.is_match(filename) {
+                    if let Some(re) = &re {
+                        if re.is_match(filename) {
+                            Some(Ok(FileInfo {
+                                path: path.to_path_buf(),
+                                filename: filename.to_string(),
+                            }))
+                        } else {
+                            None
+                        }
+                    } else {
                         Some(Ok(FileInfo {
                             path: path.to_path_buf(),
                             filename: filename.to_string(),
                         }))
-                    } else {
-                        None
                     }
                 }
                 None => None,
@@ -483,7 +511,11 @@ fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErr
         });
 
         if let Cow::Owned(_) = replaced {
-            found_lines.push(format!("Line {} - {}", idx + 1, replaced));
+            found_lines.push(format!(
+                "{}:{}",
+                Colour::Green.paint(format!("{}", idx + 1)),
+                replaced
+            ));
         }
     }
 
@@ -509,7 +541,14 @@ fn find_entry_within_file_rayon(f: &FileInfo, re: &Regex) -> Result<Vec<String>,
 
             // equivalent to:
             if let Cow::Owned(_) = replaced {
-                Some((idx, format!("Line {} - {}", idx + 1, replaced)))
+                Some((
+                    idx,
+                    format!(
+                        "{}:{}",
+                        Colour::Green.paint(format!("{}", idx + 1)),
+                        replaced
+                    ),
+                ))
             } else {
                 None
             }

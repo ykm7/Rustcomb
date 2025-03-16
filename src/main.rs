@@ -108,10 +108,22 @@ mod tests {
     // use predicates::prelude::*;
 
     #[test]
-    fn test_setup() {
+    fn test_setup_txt() {
         let args = vec![
             "Rustcomb",
-            "*.txt",
+            "test_files",
+            "metus mus. Elit convallis",
+            ".txt",
+        ];
+        let cli = rustcomb::Cli::parse_from(args);
+        // Use setup_with_args instead of setup to pass custom arguments
+        assert!(setup(cli, true).is_ok());
+    }
+
+    #[test]
+    fn test_setup_no_file_filter() {
+        let args = vec![
+            "Rustcomb",
             "test_files",
             "metus mus. Elit convallis",
         ];

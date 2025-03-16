@@ -73,7 +73,7 @@ fn setup(temp_dir: &fixture::TempDir) -> (Arc<Cli>, bool) {
 
     let cli = Arc::new(Cli {
         // Initialize fields
-        path_pattern: path_pattern.to_string(),
+        path_pattern: Some(path_pattern.to_owned()),
         path: p.to_path_buf(),
         file_pattern: file_pattern.to_string(),
     });
