@@ -1,6 +1,6 @@
 use ansi_term::Colour;
 use clap::Parser;
-use rustcomb::{PrintEnabled, Printable};
+use rustcomb::{PrintEnabled, Printable, get_cpuworkers};
 use std::{
     error::Error,
     io::{self, BufWriter, Write},
@@ -49,15 +49,15 @@ fn setup<P: Printable>(args: rustcomb::Cli, print_behaviour: P) -> Result<(), Bo
     );
     println!("{threadpool_single_elapsed_print}");
 
-    let cpus = num_cpus::get();
     let start = Instant::now();
-    rustcomb::threadpool_read_files(Arc::clone(&cli), print_behaviour, cpus)?;
+    let num_workers = get_cpuworkers();
+    rustcomb::threadpool_read_files(Arc::clone(&cli), print_behaviour, num_workers)?;
     let threadpool_multiple_elapsed = start.elapsed();
     let threadpool_multiple_elapsed_print = format!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (use_thread_pool - {} thread): {:?}",
-            cpus, threadpool_multiple_elapsed
+            num_workers, threadpool_multiple_elapsed
         ))
     );
     println!("{threadpool_multiple_elapsed_print}");
@@ -123,11 +123,7 @@ mod tests {
 
     #[test]
     fn test_setup_no_file_filter() {
-        let args = vec![
-            "Rustcomb",
-            "test_files",
-            "metus mus. Elit convallis",
-        ];
+        let args = vec!["Rustcomb", "test_files", "metus mus. Elit convallis"];
         let cli = rustcomb::Cli::parse_from(args);
         // Use setup_with_args instead of setup to pass custom arguments
         assert!(setup(cli, PrintEnabled).is_ok());

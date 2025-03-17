@@ -201,6 +201,10 @@ impl std::fmt::Display for Cli {
     }
 }
 
+pub fn get_cpuworkers() -> usize {
+    std::thread::available_parallelism().map_or(4, |n| n.get())
+}
+
 #[inline]
 pub fn single_thread_read_files<P: Printable>(
     args: Arc<Cli>,
