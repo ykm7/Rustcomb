@@ -24,14 +24,116 @@ use std::thread;
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
-/**
- * Based on various suggestions - Matches common filesystem block sizes
- */
-const FLUSH_THRESHOLD: usize = 64 * 1024; // 64KB
-/**
- * Fits in L2 cache (most modern CPUs)
- */
-const BUF_CAPACITY: usize = 256 * 1024; // 256KB
+/// This trait (and its implementation) are more to experiment with this behaviour rather than
+/// an required bit of functionality.
+/// However it should result "logic" shifting from runtime to compile-time so should be beneficial too.
+pub trait Printable: Send + 'static + Copy + Clone {
+    fn writeln<F>(&self, data: Vec<(String, Vec<String>)>, func: F) -> Result<(), MyErrors>
+    where
+        F: FnOnce(Vec<(String, Vec<String>)>) -> Result<(), MyErrors>;
+    fn writeln_w_handler<T, F>(&self, handler: &mut BufWriter<T>, func: F) -> Result<(), MyErrors>
+    where
+        T: std::io::Write,
+        F: FnOnce(&mut BufWriter<T>) -> Result<(), MyErrors>;
+    fn information_out<T, F>(
+        &self,
+        handler: &mut BufWriter<T>,
+        data: (String, Vec<String>),
+        func: F,
+    ) -> Result<(), MyErrors>
+    where
+        T: std::io::Write,
+        F: FnOnce(&mut BufWriter<T>, (String, Vec<String>)) -> Result<(), MyErrors>;
+}
+
+#[derive(Clone, Copy)]
+pub struct PrintEnabled;
+#[derive(Clone, Copy)]
+pub struct PrintDisable;
+
+impl fmt::Display for PrintEnabled {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Print is enabled")
+    }
+}
+
+impl fmt::Display for PrintDisable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Print is disabled")
+    }
+}
+
+impl Printable for PrintEnabled {
+    fn writeln<F>(&self, data: Vec<(String, Vec<String>)>, func: F) -> Result<(), MyErrors>
+    where
+        F: FnOnce(Vec<(String, Vec<String>)>) -> Result<(), MyErrors>,
+    {
+        func(data)
+    }
+
+    fn writeln_w_handler<T, F>(
+        &self,
+        handler: &mut BufWriter<T>,
+        func: F,
+    ) -> std::result::Result<(), MyErrors>
+    where
+        T: std::io::Write,
+        F: FnOnce(&mut BufWriter<T>) -> Result<(), MyErrors>,
+    {
+        func(handler)
+    }
+
+    fn information_out<T, F>(
+        &self,
+        handler: &mut BufWriter<T>,
+        data: (String, Vec<String>),
+        func: F,
+    ) -> Result<(), MyErrors>
+    where
+        T: std::io::Write,
+        F: FnOnce(&mut BufWriter<T>, (String, Vec<String>)) -> Result<(), MyErrors>,
+    {
+        func(handler, data)
+    }
+}
+
+impl Printable for PrintDisable {
+    fn writeln<F>(&self, _: Vec<(String, Vec<String>)>, _: F) -> Result<(), MyErrors>
+    where
+        F: FnOnce(Vec<(String, Vec<String>)>) -> Result<(), MyErrors>,
+    {
+        Ok(())
+    }
+
+    fn writeln_w_handler<T, F>(
+        &self,
+        _: &mut BufWriter<T>,
+        _: F,
+    ) -> std::result::Result<(), MyErrors>
+    where
+        T: std::io::Write,
+        F: FnOnce(&mut BufWriter<T>) -> Result<(), MyErrors>,
+    {
+        Ok(())
+    }
+
+    fn information_out<T, F>(
+        &self,
+        _: &mut BufWriter<T>,
+        _: (String, Vec<String>),
+        _: F,
+    ) -> Result<(), MyErrors>
+    where
+        T: std::io::Write,
+        F: FnOnce(&mut BufWriter<T>, (String, Vec<String>)) -> Result<(), MyErrors>,
+    {
+        Ok(())
+    }
+}
+
+lazy_static! {
+    static ref STAR_PATTERN: Regex = Regex::new("\\*").unwrap();
+}
 
 #[derive(Debug)]
 pub enum MyErrors {
@@ -41,10 +143,6 @@ pub enum MyErrors {
     LockError(String),
     ThreadPanic(String),
     SomeError(String),
-}
-
-lazy_static! {
-    static ref STAR_PATTERN: Regex = Regex::new("\\*").unwrap();
 }
 
 impl fmt::Display for MyErrors {
@@ -104,44 +202,50 @@ impl std::fmt::Display for Cli {
 }
 
 #[inline]
-pub fn single_thread_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
+pub fn single_thread_read_files<P: Printable>(
+    args: Arc<Cli>,
+    print_behaviour: P,
+) -> Result<(), MyErrors> {
     let path_pattern = clean_up_regex(args.path_pattern.as_deref())?;
     let iterator = find_files(&args.path, path_pattern);
     let file_pattern_re = clean_up_regex(Some(&args.file_pattern))?.ok_or(MyErrors::SomeError(
         "'file_pattern' is expected to exist".to_string(),
     ))?;
-    use_single_thread(iterator, &file_pattern_re, print)?;
+    use_single_thread(iterator, &file_pattern_re, print_behaviour)?;
     Ok(())
 }
 
 #[inline]
-pub fn rayon_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
+pub fn rayon_read_files<P: Printable>(args: Arc<Cli>, print_behaviour: P) -> Result<(), MyErrors> {
     let path_pattern = clean_up_regex(args.path_pattern.as_deref())?;
     let rayon_iterator = rayon_find_files(&args.path, path_pattern);
     let file_pattern_re = clean_up_regex(Some(&args.file_pattern))?.ok_or(MyErrors::SomeError(
         "'file_pattern' is expected to exist".to_string(),
     ))?;
-    use_rayon(rayon_iterator, &file_pattern_re, print)?;
+    use_rayon(rayon_iterator, &file_pattern_re, print_behaviour)?;
 
     Ok(())
 }
 
 #[inline]
-pub fn thread_per_file_read_files(args: Arc<Cli>, print: bool) -> Result<(), MyErrors> {
+pub fn thread_per_file_read_files<P: Printable>(
+    args: Arc<Cli>,
+    print_behaviour: P,
+) -> Result<(), MyErrors> {
     let path_pattern = clean_up_regex(args.path_pattern.as_deref())?;
     let iterator = find_files(&args.path, path_pattern);
     let file_pattern_re = clean_up_regex(Some(&args.file_pattern))?.ok_or(MyErrors::SomeError(
         "'file_pattern' is expected to exist".to_string(),
     ))?;
-    use_thread_per_file(iterator, &file_pattern_re, print)?;
+    use_thread_per_file(iterator, &file_pattern_re, print_behaviour)?;
 
     Ok(())
 }
 
 #[inline]
-pub fn threadpool_read_files(
+pub fn threadpool_read_files<P: Printable>(
     args: Arc<Cli>,
-    print: bool,
+    print_behaviour: P,
     number_of_workers: usize,
 ) -> Result<(), MyErrors> {
     let path_pattern = clean_up_regex(args.path_pattern.as_deref())?;
@@ -149,7 +253,12 @@ pub fn threadpool_read_files(
     let file_pattern_re = clean_up_regex(Some(&args.file_pattern))?.ok_or(MyErrors::SomeError(
         "'file_pattern' is expected to exist".to_string(),
     ))?;
-    use_thread_pool(iterator, &file_pattern_re, print, number_of_workers)?;
+    use_thread_pool::<_, _, { 256 * 1024 }>(
+        iterator,
+        &file_pattern_re,
+        print_behaviour,
+        number_of_workers,
+    )?;
 
     Ok(())
 }
@@ -211,7 +320,15 @@ fn information_out(results: &Vec<(String, Vec<String>)>) -> Result<(), MyErrors>
     Ok(())
 }
 
-fn information_out_each_lock(
+/// Based on various suggestions - Matches common filesystem block sizes // 64KB
+fn information_out_each_lock_default(
+    handle: &mut BufWriter<StdoutLock>,
+    results: &(String, Vec<String>),
+) -> Result<(), MyErrors> {
+    information_out_each_lock::<{ 64 * 1024 }>(handle, results)
+}
+
+fn information_out_each_lock<const FLUSH_THRESHOLD: usize>(
     handle: &mut BufWriter<StdoutLock>,
     results: &(String, Vec<String>),
 ) -> Result<(), MyErrors> {
@@ -228,7 +345,11 @@ fn information_out_each_lock(
     Ok(())
 }
 
-fn use_single_thread<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
+fn use_single_thread<I, P: Printable>(
+    iterator: I,
+    re: &Regex,
+    print_behaviour: P,
+) -> Result<(), MyErrors>
 where
     I: Iterator<Item = FileInfo>,
 {
@@ -248,9 +369,7 @@ where
         })
         .collect();
 
-    if print {
-        information_out(&results)?;
-    }
+    print_behaviour.writeln(results, |r| information_out(&r))?;
 
     Ok(())
 }
@@ -258,7 +377,11 @@ where
 /**
  * This is the initial implementation using thread::spawn
  */
-fn use_thread_per_file<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
+fn use_thread_per_file<I, P: Printable>(
+    iterator: I,
+    re: &Regex,
+    print_behaviour: P,
+) -> Result<(), MyErrors>
 where
     I: Iterator<Item = FileInfo>,
 {
@@ -287,17 +410,18 @@ where
         .filter(|result| !result.1.is_empty())
         .collect::<Vec<(String, _)>>();
 
-    if print {
-        information_out(&results)?;
-    }
+    print_behaviour.writeln(results, |r| information_out(&r))?;
 
     Ok(())
 }
 
-fn use_thread_pool<I>(
+///
+/// Fits in L2 cache (most modern CPUs)
+///
+fn use_thread_pool<I, P: Printable, const BUF_CAPACITY: usize>(
     iterator: I,
     re: &Regex,
-    print: bool,
+    print_behaviour: P,
     number_of_workers: usize,
 ) -> Result<(), MyErrors>
 where
@@ -312,26 +436,27 @@ where
     let print_handle = thread::spawn(move || -> Result<_, MyErrors> {
         let stdout = io::stdout();
         let mut handle = BufWriter::with_capacity(BUF_CAPACITY, stdout.lock()); // 1MB buffer
-        if print {
-            writeln!(handle).map_err(MyErrors::FileIO)?;
-        }
+
+        print_behaviour
+            .writeln_w_handler(&mut handle, |h| writeln!(h).map_err(MyErrors::FileIO))?;
 
         while let Ok(x) = rx.recv() {
             // TODO: Investigate the "Ordering" stuff more.
             files_found_matching_file_regex.fetch_add(1, Ordering::Relaxed);
-            if print {
-                information_out_each_lock(&mut handle, &x)?;
-            }
+            print_behaviour.information_out(&mut handle, x, |h, xx| {
+                information_out_each_lock_default(h, &xx)
+            })?;
         }
 
-        if print {
+        print_behaviour.writeln_w_handler(&mut handle, |h: &mut BufWriter<StdoutLock<'_>>| {
             writeln!(
-                handle,
+                h,
                 "Found {} files",
                 files_found_matching_file_regex.load(Ordering::Relaxed)
             )
-            .map_err(MyErrors::FileIO)?;
-        }
+            .map_err(MyErrors::FileIO)
+        })?;
+
         handle.flush().map_err(MyErrors::FileIO)?;
         Ok(())
     });
@@ -367,7 +492,7 @@ where
     Ok(())
 }
 
-fn use_rayon<I>(iterator: I, re: &Regex, print: bool) -> Result<(), MyErrors>
+fn use_rayon<I, P: Printable>(iterator: I, re: &Regex, print_behaviour: P) -> Result<(), MyErrors>
 where
     I: ParallelIterator<Item = Result<FileInfo, MyErrors>>,
 {
@@ -398,17 +523,13 @@ where
         })
         .collect();
 
-    if print {
-        information_out(&results)?;
-    }
+    print_behaviour.writeln(results, |r| information_out(&r))?;
 
     Ok(())
 }
 
 fn find_files(dir: &Path, re: Option<Regex>) -> impl Iterator<Item = FileInfo> {
-    let iterator = WalkDir::new(dir)
-    .into_iter()
-    .filter_map(move |entry| {
+    let iterator = WalkDir::new(dir).into_iter().filter_map(move |entry| {
         let entry = match entry {
             Ok(e) => e,
             Err(err) => {
