@@ -1,5 +1,6 @@
 use ansi_term::Colour;
 use clap::Parser;
+use rustcomb::{PrintEnabled, Printable, get_cpuworkers};
 use std::{
     error::Error,
     io::{self, BufWriter, Write},
@@ -8,12 +9,12 @@ use std::{
 };
 use wild::args_os;
 
-fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
+fn setup<P: Printable>(args: rustcomb::Cli, print_behaviour: P) -> Result<(), Box<dyn Error>> {
     println!("Args: {:?}", args);
     let cli = Arc::new(args);
 
     let start = Instant::now();
-    rustcomb::single_thread_read_files(Arc::clone(&cli), print)?;
+    rustcomb::single_thread_read_files(Arc::clone(&cli), print_behaviour)?;
     let single_thread = start.elapsed();
     let single_thread_print = format!(
         "{}",
@@ -25,7 +26,7 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     println!("{single_thread_print}");
 
     let start = Instant::now();
-    rustcomb::thread_per_file_read_files(Arc::clone(&cli), print)?;
+    rustcomb::thread_per_file_read_files(Arc::clone(&cli), print_behaviour)?;
     let thread_per_file_elapsed = start.elapsed();
     let thread_per_file_elapsed_print = format!(
         "{}",
@@ -37,7 +38,7 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     println!("{thread_per_file_elapsed_print}");
 
     let start = Instant::now();
-    rustcomb::threadpool_read_files(Arc::clone(&cli), print, 1)?;
+    rustcomb::threadpool_read_files(Arc::clone(&cli), print_behaviour, 1)?;
     let threadpool_single_elapsed = start.elapsed();
     let threadpool_single_elapsed_print = format!(
         "{}",
@@ -48,21 +49,21 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
     );
     println!("{threadpool_single_elapsed_print}");
 
-    let cpus = num_cpus::get();
     let start = Instant::now();
-    rustcomb::threadpool_read_files(Arc::clone(&cli), print, cpus)?;
+    let num_workers = get_cpuworkers();
+    rustcomb::threadpool_read_files(Arc::clone(&cli), print_behaviour, num_workers)?;
     let threadpool_multiple_elapsed = start.elapsed();
     let threadpool_multiple_elapsed_print = format!(
         "{}",
         Colour::Green.paint(format!(
             "Time taken for identifying files (use_thread_pool - {} thread): {:?}",
-            cpus, threadpool_multiple_elapsed
+            num_workers, threadpool_multiple_elapsed
         ))
     );
     println!("{threadpool_multiple_elapsed_print}");
 
     let start = Instant::now();
-    rustcomb::rayon_read_files(Arc::clone(&cli), print)?;
+    rustcomb::rayon_read_files(Arc::clone(&cli), print_behaviour)?;
     let rayon_elapsed = start.elapsed();
     let rayon_elapsed_print = format!(
         "{}",
@@ -95,7 +96,7 @@ fn setup(args: rustcomb::Cli, print: bool) -> Result<(), Box<dyn Error>> {
 
 fn main() {
     let cli = rustcomb::Cli::parse_from(args_os());
-    if let Err(e) = setup(cli, true) {
+    if let Err(e) = setup(cli, PrintEnabled) {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
@@ -108,16 +109,24 @@ mod tests {
     // use predicates::prelude::*;
 
     #[test]
-    fn test_setup() {
+    fn test_setup_txt() {
         let args = vec![
             "Rustcomb",
-            "*.txt",
             "test_files",
             "metus mus. Elit convallis",
+            ".txt",
         ];
         let cli = rustcomb::Cli::parse_from(args);
         // Use setup_with_args instead of setup to pass custom arguments
-        assert!(setup(cli, true).is_ok());
+        assert!(setup(cli, PrintEnabled).is_ok());
+    }
+
+    #[test]
+    fn test_setup_no_file_filter() {
+        let args = vec!["Rustcomb", "test_files", "metus mus. Elit convallis"];
+        let cli = rustcomb::Cli::parse_from(args);
+        // Use setup_with_args instead of setup to pass custom arguments
+        assert!(setup(cli, PrintEnabled).is_ok());
     }
 
     // #[test]

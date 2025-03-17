@@ -33,13 +33,13 @@ A environment file should be supplied within the `benches` directory.
 ```.env
 // Number of files to duplicate
 NUM_OF_FILES_TO_CREATE=10
-// Not currently used.
+// NOTE! Not currently used.
 NUM_OF_DIRECTORIES_TO_CREATE=0
 // the regex pattern to filter the files.
 PATH_PATTERN=".txt"
 // the regex pattern to find within the files.
 FILE_PATTERN="cubilia"
-// Enable printing of program output
+// NOTE! Not currently used - Enable printing of program output
 BENCH_PRINT_OUTPUT=false
 // Required to be "light", "medium" or "heavy" (case-insensitive) 
 // This reflects the file type to be genererated in bulk per to the benchmark running against the files.

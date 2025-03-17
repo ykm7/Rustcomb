@@ -12,11 +12,11 @@ use assert_fs::fixture;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use rustcomb::{
-    Cli, rayon_read_files, single_thread_read_files, thread_per_file_read_files,
-    threadpool_read_files,
+    Cli, PrintDisable, get_cpuworkers, rayon_read_files, single_thread_read_files,
+    thread_per_file_read_files, threadpool_read_files,
 };
 
-fn setup(temp_dir: &fixture::TempDir) -> (Arc<Cli>, bool) {
+fn setup(temp_dir: &fixture::TempDir) -> Arc<Cli> {
     from_filename(Path::new("benches").join(".env")).ok();
 
     let envs = dotenv::vars().collect::<HashMap<String, String>>();
@@ -42,11 +42,11 @@ fn setup(temp_dir: &fixture::TempDir) -> (Arc<Cli>, bool) {
         .get("FILE_PATTERN")
         .expect("Expect to find 'FILE_PATTERN'");
 
-    let bench_print_output = envs
-        .get("BENCH_PRINT_OUTPUT")
-        .expect("Expect to find 'BENCH_PRINT_OUTPUT'")
-        .parse::<bool>()
-        .unwrap();
+    // let bench_print_output = envs
+    //     .get("BENCH_PRINT_OUTPUT")
+    //     .expect("Expect to find 'BENCH_PRINT_OUTPUT'")
+    //     .parse::<bool>()
+    //     .unwrap();
 
     let file_to_duplicate: FileType = envs
         .get("FILE_TO_DUPLICATE")
@@ -73,17 +73,18 @@ fn setup(temp_dir: &fixture::TempDir) -> (Arc<Cli>, bool) {
 
     let cli = Arc::new(Cli {
         // Initialize fields
-        path_pattern: path_pattern.to_string(),
+        path_pattern: Some(path_pattern.to_owned()),
         path: p.to_path_buf(),
         file_pattern: file_pattern.to_string(),
     });
 
-    (cli, bench_print_output)
+    cli
 }
 
 fn benchmark_single_thread_read_files(c: &mut Criterion) {
     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
-    let (cli, bench_print_output) = setup(&temp_dir);
+    let cli = setup(&temp_dir);
+    let bench_print_output = PrintDisable;
 
     c.bench_with_input(
         BenchmarkId::new(
@@ -99,7 +100,8 @@ fn benchmark_single_thread_read_files(c: &mut Criterion) {
 
 fn benchmark_thread_per_file_read_files(c: &mut Criterion) {
     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
-    let (cli, bench_print_output) = setup(&temp_dir);
+    let cli = setup(&temp_dir);
+    let bench_print_output = PrintDisable;
 
     c.bench_with_input(
         BenchmarkId::new(
@@ -115,7 +117,8 @@ fn benchmark_thread_per_file_read_files(c: &mut Criterion) {
 
 fn benchmark_use_thread_pool_1(c: &mut Criterion) {
     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
-    let (cli, bench_print_output) = setup(&temp_dir);
+    let cli = setup(&temp_dir);
+    let bench_print_output = PrintDisable;
 
     c.bench_with_input(
         BenchmarkId::new(
@@ -131,19 +134,20 @@ fn benchmark_use_thread_pool_1(c: &mut Criterion) {
 
 fn benchmark_use_thread_pool_multiple_num_cpus_get(c: &mut Criterion) {
     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
-    let (cli, bench_print_output) = setup(&temp_dir);
+    let cli = setup(&temp_dir);
+    let bench_print_output = PrintDisable;
+    let num_of_workers = get_cpuworkers();
 
     c.bench_with_input(
         BenchmarkId::new(
             format!(
                 "use_thread_pool_multiple_{}_PRINT_{}",
-                num_cpus::get(),
-                bench_print_output
+                num_of_workers, bench_print_output
             ),
             &cli,
         ),
         &cli,
-        |b, s| b.iter(|| threadpool_read_files(Arc::clone(s), bench_print_output, num_cpus::get())),
+        |b, s| b.iter(|| threadpool_read_files(Arc::clone(s), bench_print_output, num_of_workers)),
     );
 
     temp_dir.close().unwrap();
@@ -151,7 +155,8 @@ fn benchmark_use_thread_pool_multiple_num_cpus_get(c: &mut Criterion) {
 
 fn benchmark_rayon_read_files(c: &mut Criterion) {
     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
-    let (cli, bench_print_output) = setup(&temp_dir);
+    let cli = setup(&temp_dir);
+    let bench_print_output = PrintDisable;
 
     c.bench_with_input(
         BenchmarkId::new(
