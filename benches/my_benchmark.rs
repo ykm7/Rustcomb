@@ -34,9 +34,11 @@ fn setup(temp_dir: &fixture::TempDir) -> Arc<Cli> {
     //     .parse::<usize>()
     //     .unwrap();
 
-    let path_pattern: &str = envs
-        .get("PATH_PATTERN")
-        .expect("Expect to find 'PATH_PATTERN'");
+    let path_pattern = match envs.get("PATH_PATTERN") {
+        Some(v) if !v.is_empty() => Some(v),
+        Some(_) => None,
+        None => None,
+    };
 
     let file_pattern: &str = envs
         .get("FILE_PATTERN")
@@ -64,6 +66,13 @@ fn setup(temp_dir: &fixture::TempDir) -> Arc<Cli> {
     //     bench_print_output
     // );
 
+    println!("\nConfiguration:*************");
+    println!(
+        "Num of files to create: {}\nFile name path regex: {:?}\nFile internal regex: {}\nFile type to duplicate: {}",
+        num_of_files_to_create, path_pattern, file_pattern, file_to_duplicate
+    );
+    println!("*****************************");
+
     let p = create_files(
         temp_dir,
         file_to_duplicate,
@@ -71,14 +80,12 @@ fn setup(temp_dir: &fixture::TempDir) -> Arc<Cli> {
         num_of_files_to_create,
     );
 
-    let cli = Arc::new(Cli {
+    Arc::new(Cli {
         // Initialize fields
-        path_pattern: Some(path_pattern.to_owned()),
+        path_pattern: path_pattern.cloned(),
         path: p.to_path_buf(),
         file_pattern: file_pattern.to_string(),
-    });
-
-    cli
+    })
 }
 
 fn benchmark_single_thread_read_files(c: &mut Criterion) {

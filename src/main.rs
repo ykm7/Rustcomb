@@ -1,15 +1,14 @@
 use ansi_term::Colour;
 use clap::Parser;
-use rustcomb::{PrintEnabled, Printable, get_cpuworkers};
+use rustcomb::{get_cpuworkers, MyErrors, PrintEnabled, Printable};
 use std::{
-    error::Error,
     io::{self, BufWriter, Write},
     sync::Arc,
     time::Instant,
 };
 use wild::args_os;
 
-fn setup<P: Printable>(args: rustcomb::Cli, print_behaviour: P) -> Result<(), Box<dyn Error>> {
+fn setup<P: Printable>(args: rustcomb::Cli, print_behaviour: P) -> Result<(), MyErrors> {
     println!("Args: {:?}", args);
     let cli = Arc::new(args);
 
@@ -77,7 +76,7 @@ fn setup<P: Printable>(args: rustcomb::Cli, print_behaviour: P) -> Result<(), Bo
     let mut handle = BufWriter::new(io::stdout());
     let mut output = String::new();
 
-    output.push('\n');
+    output.push_str("\nSummary:\n");
     output.push_str(&single_thread_print.to_string());
     output.push('\n');
     output.push_str(&thread_per_file_elapsed_print.to_string());
@@ -89,7 +88,7 @@ fn setup<P: Printable>(args: rustcomb::Cli, print_behaviour: P) -> Result<(), Bo
     output.push_str(&rayon_elapsed_print.to_string());
     output.push('\n');
 
-    handle.write_all(output.as_bytes())?;
+    handle.write_all(output.as_bytes()).map_err(MyErrors::FileIO)?;
 
     Ok(())
 }

@@ -3,6 +3,7 @@
 This project is another Grep style program written is Rust.
 
 Purpose of this is primarily to function as a learning ground for Rust.
+Output format taken from: [ripgrep](https://github.com/BurntSushi/ripgrep) as this appears to be the most prominent Rust CLI search tool.
 
 Therefore currently there are several implementations of grep like function running on serial using a variety of:
 * single/multiple threads
@@ -11,6 +12,9 @@ Therefore currently there are several implementations of grep like function runn
 * TODO Async 
 
 NOTE: The current project is not the final product. Given the nature of the project I will be making constant tweaks to improve the UX as well as attempting to correct/improve basic coding issues.
+
+Example screenshot:
+[![Example screenshot:](/docs/images/runtime.png)](/docs/images/runtime.png)
 
 ## CLI
 
@@ -35,7 +39,7 @@ A environment file should be supplied within the `benches` directory.
 NUM_OF_FILES_TO_CREATE=10
 // NOTE! Not currently used.
 NUM_OF_DIRECTORIES_TO_CREATE=0
-// the regex pattern to filter the files.
+// Note! [OPTIONAL FILTER] the regex pattern to filter the files.
 PATH_PATTERN=".txt"
 // the regex pattern to find within the files.
 FILE_PATTERN="cubilia"
@@ -45,6 +49,9 @@ BENCH_PRINT_OUTPUT=false
 // This reflects the file type to be genererated in bulk per to the benchmark running against the files.
 FILE_TO_DUPLICATE=light
 ```
+
+Example screenshot:
+[![Example screenshot:](/docs/images/benchmark_1.png)](/docs/images/benchmark_1.png)
 
 ### File generation
 Generated with: [Lorem Ipsum Generator](https://loremipsum.io/generator?n=10&t=p)
