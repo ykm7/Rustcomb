@@ -2,8 +2,11 @@ use ansi_term::Colour;
 use clap::Parser;
 use core::fmt;
 use lazy_static::lazy_static;
+use memmap2::MmapOptions;
 use rayon::prelude::*;
+use rayon::range;
 use regex::Regex;
+use regex::bytes;
 use std::borrow::Cow;
 use std::error;
 use std::error::Error;
@@ -358,7 +361,7 @@ where
     I: Iterator<Item = FileInfo>,
 {
     let results: Vec<(String, Vec<String>)> = iterator
-        .filter_map(|file| match find_entry_within_file(&file, re) {
+        .filter_map(|file| match find_entry_with_file_memmap(&file, re) {
             Err(err) => {
                 eprintln!("Error while searching file {}", err);
                 None
@@ -397,7 +400,7 @@ where
         let re: Arc<Regex> = Arc::clone(&re);
         let file_id = file.get_identifier();
         let handle: thread::JoinHandle<Vec<String>> =
-            thread::spawn(move || match find_entry_within_file(&file, &re) {
+            thread::spawn(move || match find_entry_with_file_memmap(&file, &re) {
                 Err(err) => {
                     eprintln!("Error while searching file {}", err);
                     Vec::new()
@@ -470,7 +473,7 @@ where
         let re: Arc<Regex> = Arc::clone(&re);
         let file_id = file.get_identifier();
 
-        pool.execute(move || match find_entry_within_file(&file, &re) {
+        pool.execute(move || match find_entry_with_file_memmap(&file, &re) {
             Err(err) => {
                 eprintln!("Error while searching file {}", err);
             }
@@ -623,6 +626,7 @@ fn rayon_find_files(
  * all concurrency/parallelism.
  * TODO: either expand on this OR more likely make separate ones (in particular for Rayon)
  */
+#[warn(dead_code)]
 fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
     let file = File::open(&f.path).map_err(MyErrors::FileIO)?;
     let reader = BufReader::new(file);
@@ -642,6 +646,73 @@ fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErr
                 replaced
             ));
         }
+    }
+
+    Ok(found_lines)
+}
+
+fn find_entry_with_file_memmap(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
+    let mut found_lines = Vec::new();
+    let byte_re = bytes::Regex::new(re.as_str()).map_err(MyErrors::Regex)?;
+
+    let file = File::open(&f.path).map_err(MyErrors::FileIO)?;
+
+    // TODO: test .map vs .map_copy
+    let mmap = unsafe { MmapOptions::new().map(&file).map_err(MyErrors::FileIO)? };
+
+    let mut pos = 0;
+    let mut line_num = 1;
+
+    while pos < mmap.len() {
+        let end = mmap[pos..]
+            .iter()
+            .position(|&b| b == b'\n')
+            .map(|p| pos + p)
+            .unwrap_or(mmap.len());
+
+        // Check for CRLF
+        let is_crlf = end > pos && mmap[end - 1] == b'\r';
+        let line_bytes = if is_crlf {
+            &mmap[pos..end - 1] // Exclude \r
+        } else {
+            &mmap[pos..end]
+        };
+
+        // let line_bytes = &mmap[pos..end];
+        let line_str = String::from_utf8_lossy(line_bytes);
+        let mut current_pos = 0;
+
+        let mut modified_line: Option<String> = None;
+
+        for cap in byte_re.captures_iter(line_bytes) {
+            if let Some(m) = cap.get(0) {
+                let range = m.range();
+                if range.start == range.end {
+                    break;
+                }
+
+                let mat = modified_line.get_or_insert_with(|| line_str[..current_pos].to_string());
+                mat.push_str(&line_str[current_pos..range.start]);
+                mat.push_str(&format!(
+                    "{}",
+                    Colour::Red.paint(&line_str[range.start..range.end])
+                ));
+
+                current_pos = range.end;
+            }
+        }
+
+        if let Some(mut m1) = modified_line {
+            m1.push_str(&line_str[current_pos..]);
+            found_lines.push(format!(
+                "{}:{}",
+                Colour::Green.paint(format!("{}", line_num)),
+                m1
+            ));
+        }
+
+        pos = if end < mmap.len() { end + 1 } else { end };
+        line_num += 1;
     }
 
     Ok(found_lines)
@@ -682,4 +753,35 @@ fn find_entry_within_file_rayon(f: &FileInfo, re: &Regex) -> Result<Vec<String>,
 
     results.par_sort_unstable_by_key(|(idx, _)| *idx);
     Ok(results.into_iter().map(|(_, f)| f).collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::{Path, PathBuf};
+
+    use regex::Regex;
+
+    use crate::{FileInfo, find_entry_with_file_memmap};
+
+    #[test]
+    fn test_find_entry_with_file_memmap() {
+        let filename = "light_file.txt";
+        let file_path: PathBuf = Path::new("test_files").join("light_file.txt");
+        let file_info: FileInfo = FileInfo {
+            filename: filename.to_string(),
+            path: file_path,
+        };
+
+        let re = Regex::new("Dis dignissim pulvinar senectus at porta aenean.")
+            .expect("Expected to be able to create regex from string");
+
+        let r = find_entry_with_file_memmap(&file_info, &re);
+
+        let expected_results = [
+            "20:Rhoncus erat eros cubilia sociosqu amet vestibulum in. Convallis libero dolor nascetur penatibus sapien. Magna porttitor a mauris leo dictum fames at pulvinar. Condimentum enim feugiat sagittis torquent suscipit tempor commodo leo. Lacus enim curae penatibus nisi sapien duis in nostra. Dictum aliquet magna class gravida ante tempor ultricies. Nam taciti elit libero ornare per, laoreet auctor. Dis dignissim pulvinar senectus at porta aenean.",
+        ];
+        let x = expected_results.map(|f| f.to_string()).to_vec();
+
+        assert_eq!(r.ok(), Some(x))
+    }
 }
