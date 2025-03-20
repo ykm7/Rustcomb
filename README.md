@@ -13,8 +13,13 @@ Therefore currently there are several implementations of grep like function runn
 
 NOTE: The current project is not the final product. Given the nature of the project I will be making constant tweaks to improve the UX as well as attempting to correct/improve basic coding issues.
 
-Example screenshot:
-[![Example screenshot:](/docs/images/runtime.png)](/docs/images/runtime.png)
+## Example screenshots:
+
+No path filter specified
+[![Example no path filter specified:](/docs/images/runtime_no_path_filer_literal.png)](/docs/images/runtime_no_path_filer_literal.png)
+
+Regex applied to both file names as well as internal file search. These can be mixed and matched
+[![Example no path filter specified:](/docs/images/runtime_regex.png)](/docs/images/runtime_regex.png)
 
 ## CLI
 
@@ -39,10 +44,14 @@ A environment file should be supplied within the `benches` directory.
 NUM_OF_FILES_TO_CREATE=10
 // NOTE! Not currently used.
 NUM_OF_DIRECTORIES_TO_CREATE=0
-// Note! [OPTIONAL FILTER] the regex pattern to filter the files.
+// [OPTIONAL] the regex pattern to filter the files.
 PATH_PATTERN=".txt"
+// [OPTIONAL] Required to be "literal" or "regex" - defaults to "literal"
+PATH_PATTERN_REGEX="literal"
 // the regex pattern to find within the files.
 FILE_PATTERN="cubilia"
+// [OPTIONAL] Required to be "literal" or "regex" - defaults to "literal"
+FILE_PATTERN_REGEX="literal"
 // NOTE! Not currently used - Enable printing of program output
 BENCH_PRINT_OUTPUT=false
 // Required to be "light", "medium" or "heavy" (case-insensitive) 
