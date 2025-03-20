@@ -4,7 +4,6 @@ use core::fmt;
 use lazy_static::lazy_static;
 use memmap2::MmapOptions;
 use rayon::prelude::*;
-use rayon::range;
 use regex::Regex;
 use regex::bytes;
 use std::borrow::Cow;
@@ -759,12 +758,10 @@ fn find_entry_within_file_rayon(f: &FileInfo, re: &Regex) -> Result<Vec<String>,
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use regex::Regex;
-
-    use crate::{FileInfo, find_entry_with_file_memmap};
+    use crate::{FileInfo, clean_up_regex, find_entry_with_file_memmap};
 
     #[test]
-    fn test_find_entry_with_file_memmap() {
+    fn test_find_entry_with_file_memmap_basic_regex() {
         let filename = "light_file.txt";
         let file_path: PathBuf = Path::new("test_files").join("light_file.txt");
         let file_info: FileInfo = FileInfo {
@@ -772,16 +769,48 @@ mod tests {
             path: file_path,
         };
 
-        let re = Regex::new("Dis dignissim pulvinar senectus at porta aenean.")
-            .expect("Expected to be able to create regex from string");
+        let re = clean_up_regex(Some("Dis dignissim pulvinar senectus at porta aenean."))
+            .expect("Expected to be able to create regex from string")
+            .unwrap();
 
         let r = find_entry_with_file_memmap(&file_info, &re);
 
-        let expected_results = [
-            "20:Rhoncus erat eros cubilia sociosqu amet vestibulum in. Convallis libero dolor nascetur penatibus sapien. Magna porttitor a mauris leo dictum fames at pulvinar. Condimentum enim feugiat sagittis torquent suscipit tempor commodo leo. Lacus enim curae penatibus nisi sapien duis in nostra. Dictum aliquet magna class gravida ante tempor ultricies. Nam taciti elit libero ornare per, laoreet auctor. Dis dignissim pulvinar senectus at porta aenean.",
-        ];
-        let x = expected_results.map(|f| f.to_string()).to_vec();
+        let expected_results: [String; 1] = [format!(
+            "{}:{}{}",
+            ansi_term::Color::Green.paint("19"),
+            "Rhoncus erat eros cubilia sociosqu amet vestibulum in. Convallis libero dolor nascetur penatibus sapien. Magna porttitor a mauris leo dictum fames at pulvinar. Condimentum enim feugiat sagittis torquent suscipit tempor commodo leo. Lacus enim curae penatibus nisi sapien duis in nostra. Dictum aliquet magna class gravida ante tempor ultricies. Nam taciti elit libero ornare per, laoreet auctor. ",
+            ansi_term::Color::Red.paint("Dis dignissim pulvinar senectus at porta aenean.")
+        )];
+        let x = expected_results.to_vec();
 
-        assert_eq!(r.ok(), Some(x))
+        assert_eq!(r.ok().unwrap(), x)
     }
+
+    // #[test]
+    // fn test_find_entry_with_file_memmap_actually_using_regex() {
+    //     let filename = "light_file.txt";
+    //     let file_path: PathBuf = Path::new("test_files").join("light_file.txt");
+    //     let file_info: FileInfo = FileInfo {
+    //         filename: filename.to_string(),
+    //         path: file_path,
+    //     };
+
+    //     let re = clean_up_regex(Some("porta[ ]aenean."))
+    //         .expect("Expected to be able to create regex from string")
+    //         .unwrap();
+
+    //         println!("{}", re);
+
+    //     let r = find_entry_with_file_memmap(&file_info, &re);
+
+    //     let expected_results: [String; 1] = [format!(
+    //         "{}:{}{}",
+    //         ansi_term::Color::Green.paint("19"),
+    //         "Rhoncus erat eros cubilia sociosqu amet vestibulum in. Convallis libero dolor nascetur penatibus sapien. Magna porttitor a mauris leo dictum fames at pulvinar. Condimentum enim feugiat sagittis torquent suscipit tempor commodo leo. Lacus enim curae penatibus nisi sapien duis in nostra. Dictum aliquet magna class gravida ante tempor ultricies. Nam taciti elit libero ornare per, laoreet auctor. ",
+    //         ansi_term::Color::Red.paint("porta aenean.")
+    //     )];
+    //     let x = expected_results.to_vec();
+
+    //     assert_eq!(r.ok().unwrap(), x)
+    // }
 }
