@@ -41,8 +41,12 @@ NUM_OF_FILES_TO_CREATE=10
 NUM_OF_DIRECTORIES_TO_CREATE=0
 // Note! [OPTIONAL FILTER] the regex pattern to filter the files.
 PATH_PATTERN=".txt"
+// Required to be "literal" or "regex" - defaults to "literal"
+PATH_PATTERN_REGEX="literal"
 // the regex pattern to find within the files.
 FILE_PATTERN="cubilia"
+// Required to be "literal" or "regex" - defaults to "literal"
+FILE_PATTERN_REGEX="literal"
 // NOTE! Not currently used - Enable printing of program output
 BENCH_PRINT_OUTPUT=false
 // Required to be "light", "medium" or "heavy" (case-insensitive) 

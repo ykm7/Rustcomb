@@ -1,11 +1,10 @@
-use std::{fmt::Display, str::FromStr};
+use std::str::FromStr;
 
-use lazy_static::lazy_static;
 use regex::Regex;
 
 use crate::MyErrors;
 
-#[derive(Clone, Debug, PartialEq, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, clap::ValueEnum)]
 pub enum SearchMode {
     #[clap(name = "literal", help = "Match exact literal strings")]
     Literal,
@@ -13,10 +12,20 @@ pub enum SearchMode {
     Regex,
 }
 
-// lazy_static! {
-//     static ref STAR_PATTERN: Regex = Regex::new("\\*").unwrap();
-// }
+impl FromStr for SearchMode {
+    type Err = String;
 
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_str() {
+            "literal" => Ok(SearchMode::Literal),
+            "regex" => Ok(SearchMode::Regex),
+            _ => Err(
+                "Not an expected conversion string. Required to be either [literal or regex]"
+                    .to_string(),
+            ),
+        }
+    }
+}
 /**
  * Use a single initialised re pattern to save it being created on each call (STAR_PATTERN)
  *

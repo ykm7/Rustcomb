@@ -16,6 +16,8 @@ use rustcomb::{
     thread_per_file_read_files, threadpool_read_files,
 };
 
+use rustcomb::my_regex::SearchMode;
+
 fn setup(temp_dir: &fixture::TempDir) -> Arc<Cli> {
     from_filename(Path::new("benches").join(".env")).ok();
 
@@ -34,6 +36,12 @@ fn setup(temp_dir: &fixture::TempDir) -> Arc<Cli> {
     //     .parse::<usize>()
     //     .unwrap();
 
+    let path_pattern_regex: SearchMode = envs
+        .get("PATH_PATTERN_REGEX")
+        .expect("Expect to find 'PATH_PATTERN_REGEX'")
+        .parse::<SearchMode>()
+        .unwrap();
+
     let path_pattern = match envs.get("PATH_PATTERN") {
         Some(v) if !v.is_empty() => Some(v),
         Some(_) => None,
@@ -49,6 +57,12 @@ fn setup(temp_dir: &fixture::TempDir) -> Arc<Cli> {
     //     .expect("Expect to find 'BENCH_PRINT_OUTPUT'")
     //     .parse::<bool>()
     //     .unwrap();
+
+    let file_pattern_regex: SearchMode = envs
+        .get("FILE_PATTERN_REGEX")
+        .expect("Expect to find 'FILE_PATTERN_REGEX'")
+        .parse::<SearchMode>()
+        .unwrap();
 
     let file_to_duplicate: FileType = envs
         .get("FILE_TO_DUPLICATE")
@@ -85,6 +99,8 @@ fn setup(temp_dir: &fixture::TempDir) -> Arc<Cli> {
         path_pattern: path_pattern.cloned(),
         path: p.to_path_buf(),
         file_pattern: file_pattern.to_string(),
+        file_pattern_regex,
+        path_pattern_regex,
     })
 }
 

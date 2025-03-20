@@ -1,7 +1,6 @@
 use ansi_term::Colour;
 use clap::Parser;
 use core::fmt;
-use lazy_static::lazy_static;
 use memmap2::MmapOptions;
 use my_regex::SearchMode;
 use rayon::prelude::*;
@@ -27,7 +26,7 @@ use std::thread;
 use threadpool::ThreadPool;
 use walkdir::WalkDir;
 
-mod my_regex;
+pub mod my_regex;
 /// This trait (and its implementation) are more to experiment with this behaviour rather than
 /// an required bit of functionality.
 /// However it should result "logic" shifting from runtime to compile-time so should be beneficial too.
@@ -222,10 +221,10 @@ pub fn single_thread_read_files<P: Printable>(
     print_behaviour: P,
 ) -> Result<(), MyErrors> {
     let path_pattern =
-        my_regex::clean_up_regex(args.path_pattern.as_deref(), my_regex::SearchMode::Literal)?;
+        my_regex::clean_up_regex(args.path_pattern.as_deref(), args.path_pattern_regex)?;
     let iterator = find_files(&args.path, path_pattern);
     let file_pattern_re =
-        my_regex::clean_up_regex(Some(&args.file_pattern), my_regex::SearchMode::Literal)?.ok_or(
+        my_regex::clean_up_regex(Some(&args.file_pattern), args.file_pattern_regex)?.ok_or(
             MyErrors::SomeError("'file_pattern' is expected to exist".to_string()),
         )?;
     use_single_thread(iterator, &file_pattern_re, print_behaviour)?;
@@ -235,10 +234,10 @@ pub fn single_thread_read_files<P: Printable>(
 #[inline]
 pub fn rayon_read_files<P: Printable>(args: Arc<Cli>, print_behaviour: P) -> Result<(), MyErrors> {
     let path_pattern =
-        my_regex::clean_up_regex(args.path_pattern.as_deref(), my_regex::SearchMode::Literal)?;
+        my_regex::clean_up_regex(args.path_pattern.as_deref(), args.path_pattern_regex)?;
     let rayon_iterator = rayon_find_files(&args.path, path_pattern);
     let file_pattern_re =
-        my_regex::clean_up_regex(Some(&args.file_pattern), my_regex::SearchMode::Literal)?.ok_or(
+        my_regex::clean_up_regex(Some(&args.file_pattern), args.file_pattern_regex)?.ok_or(
             MyErrors::SomeError("'file_pattern' is expected to exist".to_string()),
         )?;
     use_rayon(rayon_iterator, &file_pattern_re, print_behaviour)?;
@@ -252,10 +251,10 @@ pub fn thread_per_file_read_files<P: Printable>(
     print_behaviour: P,
 ) -> Result<(), MyErrors> {
     let path_pattern =
-        my_regex::clean_up_regex(args.path_pattern.as_deref(), my_regex::SearchMode::Literal)?;
+        my_regex::clean_up_regex(args.path_pattern.as_deref(), args.path_pattern_regex)?;
     let iterator = find_files(&args.path, path_pattern);
     let file_pattern_re =
-        my_regex::clean_up_regex(Some(&args.file_pattern), my_regex::SearchMode::Literal)?.ok_or(
+        my_regex::clean_up_regex(Some(&args.file_pattern), args.file_pattern_regex)?.ok_or(
             MyErrors::SomeError("'file_pattern' is expected to exist".to_string()),
         )?;
     use_thread_per_file(iterator, &file_pattern_re, print_behaviour)?;
@@ -270,10 +269,10 @@ pub fn threadpool_read_files<P: Printable>(
     number_of_workers: usize,
 ) -> Result<(), MyErrors> {
     let path_pattern =
-        my_regex::clean_up_regex(args.path_pattern.as_deref(), my_regex::SearchMode::Literal)?;
+        my_regex::clean_up_regex(args.path_pattern.as_deref(), args.path_pattern_regex)?;
     let iterator = find_files(&args.path, path_pattern);
     let file_pattern_re =
-        my_regex::clean_up_regex(Some(&args.file_pattern), my_regex::SearchMode::Literal)?.ok_or(
+        my_regex::clean_up_regex(Some(&args.file_pattern), args.file_pattern_regex)?.ok_or(
             MyErrors::SomeError("'file_pattern' is expected to exist".to_string()),
         )?;
     use_thread_pool::<_, _, { 256 * 1024 }>(
@@ -642,7 +641,7 @@ fn rayon_find_files(
  * all concurrency/parallelism.
  * TODO: either expand on this OR more likely make separate ones (in particular for Rayon)
  */
-#[warn(dead_code)]
+#[allow(dead_code)]
 fn find_entry_within_file(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
     let file = File::open(&f.path).map_err(MyErrors::FileIO)?;
     let reader = BufReader::new(file);
@@ -775,59 +774,57 @@ fn find_entry_within_file_rayon(f: &FileInfo, re: &Regex) -> Result<Vec<String>,
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use crate::{FileInfo, find_entry_with_file_memmap, my_regex};
+    use crate::{find_entry_with_file_memmap, my_regex::{self, SearchMode}, FileInfo};
 
-    // #[test]
-    // fn test_find_entry_with_file_memmap_basic_regex() {
-    //     let filename = "light_file.txt";
-    //     let file_path: PathBuf = Path::new("test_files").join("light_file.txt");
-    //     let file_info: FileInfo = FileInfo {
-    //         filename: filename.to_string(),
-    //         path: file_path,
-    //     };
+    #[test]
+    fn test_find_entry_with_file_memmap_basic_regex() {
+        let filename = "light_file.txt";
+        let file_path: PathBuf = Path::new("test_files").join(filename);
+        let file_info: FileInfo = FileInfo {
+            filename: filename.to_string(),
+            path: file_path,
+        };
 
-    //     let re = my_regex::clean_up_regex(Some("Dis dignissim pulvinar senectus at porta aenean."))
-    //         .expect("Expected to be able to create regex from string")
-    //         .unwrap();
+        let re = my_regex::clean_up_regex(Some("Dis dignissim pulvinar senectus at porta aenean."),  SearchMode::Literal)
+            .expect("Expected to be able to create regex from string")
+            .unwrap();
 
-    //     let r = find_entry_with_file_memmap(&file_info, &re);
+        let r = find_entry_with_file_memmap(&file_info, &re);
 
-    //     let expected_results: [String; 1] = [format!(
-    //         "{}:{}{}",
-    //         ansi_term::Color::Green.paint("19"),
-    //         "Rhoncus erat eros cubilia sociosqu amet vestibulum in. Convallis libero dolor nascetur penatibus sapien. Magna porttitor a mauris leo dictum fames at pulvinar. Condimentum enim feugiat sagittis torquent suscipit tempor commodo leo. Lacus enim curae penatibus nisi sapien duis in nostra. Dictum aliquet magna class gravida ante tempor ultricies. Nam taciti elit libero ornare per, laoreet auctor. ",
-    //         ansi_term::Color::Red.paint("Dis dignissim pulvinar senectus at porta aenean.")
-    //     )];
-    //     let x = expected_results.to_vec();
+        let expected_results: [String; 1] = [format!(
+            "{}:{}{}",
+            ansi_term::Color::Green.paint("19"),
+            "Rhoncus erat eros cubilia sociosqu amet vestibulum in. Convallis libero dolor nascetur penatibus sapien. Magna porttitor a mauris leo dictum fames at pulvinar. Condimentum enim feugiat sagittis torquent suscipit tempor commodo leo. Lacus enim curae penatibus nisi sapien duis in nostra. Dictum aliquet magna class gravida ante tempor ultricies. Nam taciti elit libero ornare per, laoreet auctor. ",
+            ansi_term::Color::Red.paint("Dis dignissim pulvinar senectus at porta aenean.")
+        )];
+        let x = expected_results.to_vec();
 
-    //     assert_eq!(r.ok().unwrap(), x)
-    // }
+        assert_eq!(r.ok().unwrap(), x)
+    }
 
-    // #[test]
-    // fn test_find_entry_with_file_memmap_actually_using_regex() {
-    //     let filename = "light_file.txt";
-    //     let file_path: PathBuf = Path::new("test_files").join("light_file.txt");
-    //     let file_info: FileInfo = FileInfo {
-    //         filename: filename.to_string(),
-    //         path: file_path,
-    //     };
+    #[test]
+    fn test_find_entry_with_file_memmap_actually_using_regex() {
+        let filename = "light_file.txt";
+        let file_path: PathBuf = Path::new("test_files").join(filename);
+        let file_info: FileInfo = FileInfo {
+            filename: filename.to_string(),
+            path: file_path,
+        };
 
-    //     let re = clean_up_regex(Some("porta[ ]aenean."))
-    //         .expect("Expected to be able to create regex from string")
-    //         .unwrap();
+        let re = my_regex::clean_up_regex(Some("Dis[ ]dignissim[ ]pulvinar[ ]senectus[ ]at[ ]porta[ ]aenean."), SearchMode::Regex)
+            .expect("Expected to be able to create regex from string")
+            .unwrap();
 
-    //         println!("{}", re);
+        let r = find_entry_with_file_memmap(&file_info, &re);
 
-    //     let r = find_entry_with_file_memmap(&file_info, &re);
+        let expected_results: [String; 1] = [format!(
+            "{}:{}{}",
+            ansi_term::Color::Green.paint("19"),
+            "Rhoncus erat eros cubilia sociosqu amet vestibulum in. Convallis libero dolor nascetur penatibus sapien. Magna porttitor a mauris leo dictum fames at pulvinar. Condimentum enim feugiat sagittis torquent suscipit tempor commodo leo. Lacus enim curae penatibus nisi sapien duis in nostra. Dictum aliquet magna class gravida ante tempor ultricies. Nam taciti elit libero ornare per, laoreet auctor. ",
+            ansi_term::Color::Red.paint("Dis dignissim pulvinar senectus at porta aenean.")
+        )];
+        let x = expected_results.to_vec();
 
-    //     let expected_results: [String; 1] = [format!(
-    //         "{}:{}{}",
-    //         ansi_term::Color::Green.paint("19"),
-    //         "Rhoncus erat eros cubilia sociosqu amet vestibulum in. Convallis libero dolor nascetur penatibus sapien. Magna porttitor a mauris leo dictum fames at pulvinar. Condimentum enim feugiat sagittis torquent suscipit tempor commodo leo. Lacus enim curae penatibus nisi sapien duis in nostra. Dictum aliquet magna class gravida ante tempor ultricies. Nam taciti elit libero ornare per, laoreet auctor. ",
-    //         ansi_term::Color::Red.paint("porta aenean.")
-    //     )];
-    //     let x = expected_results.to_vec();
-
-    //     assert_eq!(r.ok().unwrap(), x)
-    // }
+        assert_eq!(r.ok().unwrap(), x)
+    }
 }
