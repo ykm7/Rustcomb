@@ -12,8 +12,8 @@ use assert_fs::fixture;
 use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 
 use rustcomb::{
-    Cli, PrintDisable, get_cpuworkers, rayon_read_files, single_thread_read_files,
-    thread_per_file_read_files, threadpool_read_files,
+    Cli, PrintDisable, async_read_files, get_cpuworkers, rayon_read_files,
+    single_thread_read_files, thread_per_file_read_files, threadpool_read_files,
 };
 
 use rustcomb::my_regex::SearchMode;
@@ -104,12 +104,14 @@ fn setup(temp_dir: &fixture::TempDir) -> Arc<Cli> {
     })
 }
 
-fn benchmark_single_thread_read_files(c: &mut Criterion) {
+fn bench_various_reads(c: &mut Criterion) {
     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
     let cli = setup(&temp_dir);
     let bench_print_output = PrintDisable;
 
-    c.bench_with_input(
+    let mut group = c.benchmark_group("regex files search");
+
+    group.bench_with_input(
         BenchmarkId::new(
             format!("single_thread_read_files_PRINT_{}", bench_print_output),
             &cli,
@@ -118,15 +120,7 @@ fn benchmark_single_thread_read_files(c: &mut Criterion) {
         |b, s| b.iter(|| single_thread_read_files(Arc::clone(s), bench_print_output)),
     );
 
-    temp_dir.close().unwrap();
-}
-
-fn benchmark_thread_per_file_read_files(c: &mut Criterion) {
-    let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
-    let cli = setup(&temp_dir);
-    let bench_print_output = PrintDisable;
-
-    c.bench_with_input(
+    group.bench_with_input(
         BenchmarkId::new(
             format!("thread_per_file_read_files_PRINT_{}", bench_print_output),
             &cli,
@@ -135,15 +129,7 @@ fn benchmark_thread_per_file_read_files(c: &mut Criterion) {
         |b, s| b.iter(|| thread_per_file_read_files(Arc::clone(s), bench_print_output)),
     );
 
-    temp_dir.close().unwrap();
-}
-
-fn benchmark_use_thread_pool_1(c: &mut Criterion) {
-    let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
-    let cli = setup(&temp_dir);
-    let bench_print_output = PrintDisable;
-
-    c.bench_with_input(
+    group.bench_with_input(
         BenchmarkId::new(
             format!("use_thread_pool_single_thread_PRINT_{}", bench_print_output),
             &cli,
@@ -152,16 +138,8 @@ fn benchmark_use_thread_pool_1(c: &mut Criterion) {
         |b, s| b.iter(|| threadpool_read_files(Arc::clone(s), bench_print_output, 1)),
     );
 
-    temp_dir.close().unwrap();
-}
-
-fn benchmark_use_thread_pool_multiple_num_cpus_get(c: &mut Criterion) {
-    let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
-    let cli = setup(&temp_dir);
-    let bench_print_output = PrintDisable;
     let num_of_workers = get_cpuworkers();
-
-    c.bench_with_input(
+    group.bench_with_input(
         BenchmarkId::new(
             format!(
                 "use_thread_pool_multiple_{}_PRINT_{}",
@@ -173,15 +151,7 @@ fn benchmark_use_thread_pool_multiple_num_cpus_get(c: &mut Criterion) {
         |b, s| b.iter(|| threadpool_read_files(Arc::clone(s), bench_print_output, num_of_workers)),
     );
 
-    temp_dir.close().unwrap();
-}
-
-fn benchmark_rayon_read_files(c: &mut Criterion) {
-    let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
-    let cli = setup(&temp_dir);
-    let bench_print_output = PrintDisable;
-
-    c.bench_with_input(
+    group.bench_with_input(
         BenchmarkId::new(
             format!("rayon_read_files_PRINT_{}", bench_print_output),
             &cli,
@@ -190,15 +160,125 @@ fn benchmark_rayon_read_files(c: &mut Criterion) {
         |b, s| b.iter(|| rayon_read_files(Arc::clone(s), bench_print_output)),
     );
 
+    group.bench_with_input(
+        BenchmarkId::new(
+            format!("async_read_files_PRINT_{}", bench_print_output),
+            &cli,
+        ),
+        &cli,
+        |b, s| b.iter(|| async { async_read_files(Arc::clone(s), bench_print_output).await }),
+    );
+
+    group.finish();
+
     temp_dir.close().unwrap();
 }
 
-criterion_group!(
-    benches,
-    benchmark_single_thread_read_files,
-    benchmark_thread_per_file_read_files,
-    benchmark_use_thread_pool_1,
-    benchmark_use_thread_pool_multiple_num_cpus_get,
-    benchmark_rayon_read_files
-);
+// fn benchmark_single_thread_read_files(c: &mut Criterion) {
+//     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
+//     let cli = setup(&temp_dir);
+//     let bench_print_output = PrintDisable;
+
+//     c.bench_with_input(
+//         BenchmarkId::new(
+//             format!("single_thread_read_files_PRINT_{}", bench_print_output),
+//             &cli,
+//         ),
+//         &cli,
+//         |b, s| b.iter(|| single_thread_read_files(Arc::clone(s), bench_print_output)),
+//     );
+
+//     temp_dir.close().unwrap();
+// }
+
+// fn benchmark_thread_per_file_read_files(c: &mut Criterion) {
+//     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
+//     let cli = setup(&temp_dir);
+//     let bench_print_output = PrintDisable;
+
+//     c.bench_with_input(
+//         BenchmarkId::new(
+//             format!("thread_per_file_read_files_PRINT_{}", bench_print_output),
+//             &cli,
+//         ),
+//         &cli,
+//         |b, s| b.iter(|| thread_per_file_read_files(Arc::clone(s), bench_print_output)),
+//     );
+
+//     temp_dir.close().unwrap();
+// }
+
+// fn benchmark_use_thread_pool_1(c: &mut Criterion) {
+//     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
+//     let cli = setup(&temp_dir);
+//     let bench_print_output = PrintDisable;
+
+//     c.bench_with_input(
+//         BenchmarkId::new(
+//             format!("use_thread_pool_single_thread_PRINT_{}", bench_print_output),
+//             &cli,
+//         ),
+//         &cli,
+//         |b, s| b.iter(|| threadpool_read_files(Arc::clone(s), bench_print_output, 1)),
+//     );
+
+//     temp_dir.close().unwrap();
+// }
+
+// fn benchmark_use_thread_pool_multiple_num_cpus_get(c: &mut Criterion) {
+//     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
+//     let cli = setup(&temp_dir);
+//     let bench_print_output = PrintDisable;
+//     let num_of_workers = get_cpuworkers();
+
+//     c.bench_with_input(
+//         BenchmarkId::new(
+//             format!(
+//                 "use_thread_pool_multiple_{}_PRINT_{}",
+//                 num_of_workers, bench_print_output
+//             ),
+//             &cli,
+//         ),
+//         &cli,
+//         |b, s| b.iter(|| threadpool_read_files(Arc::clone(s), bench_print_output, num_of_workers)),
+//     );
+
+//     temp_dir.close().unwrap();
+// }
+
+// fn benchmark_rayon_read_files(c: &mut Criterion) {
+//     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
+//     let cli = setup(&temp_dir);
+//     let bench_print_output = PrintDisable;
+
+//     c.bench_with_input(
+//         BenchmarkId::new(
+//             format!("rayon_read_files_PRINT_{}", bench_print_output),
+//             &cli,
+//         ),
+//         &cli,
+//         |b, s| b.iter(|| rayon_read_files(Arc::clone(s), bench_print_output)),
+//     );
+
+//     temp_dir.close().unwrap();
+// }
+
+// fn benchmark_async_read_files(c: &mut Criterion) {
+//     let temp_dir: fixture::TempDir = assert_fs::TempDir::new().unwrap();
+//     let cli = setup(&temp_dir);
+//     let bench_print_output = PrintDisable;
+
+//     c.bench_with_input(
+//         BenchmarkId::new(
+//             format!("async_read_files_PRINT_{}", bench_print_output),
+//             &cli,
+//         ),
+//         &cli,
+//         |b, s| b.iter(|| async { async_read_files(Arc::clone(s), bench_print_output).await }),
+//     );
+
+//     temp_dir.close().unwrap();
+// }
+
+criterion_group!(benches, bench_various_reads);
 criterion_main!(benches);

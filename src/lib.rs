@@ -1,6 +1,7 @@
 use ansi_term::Colour;
 use clap::Parser;
 use core::fmt;
+use futures::stream::{self, StreamExt};
 use memmap2::MmapOptions;
 use my_regex::SearchMode;
 use rayon::prelude::*;
@@ -24,6 +25,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::thread;
 use threadpool::ThreadPool;
+use tokio::io::AsyncReadExt;
 use walkdir::WalkDir;
 
 pub mod my_regex;
@@ -139,6 +141,7 @@ pub enum MyErrors {
     Regex(regex::Error),
     WalkDir(walkdir::Error),
     FileIO(io::Error),
+    Utf8Error(std::string::FromUtf8Error),
     LockError(String),
     ThreadPanic(String),
     SomeError(String),
@@ -153,6 +156,7 @@ impl fmt::Display for MyErrors {
             MyErrors::LockError(ref e) => write!(f, "Lock error ({})", e),
             MyErrors::ThreadPanic(ref e) => write!(f, "thread error ({})", e),
             MyErrors::SomeError(ref e) => write!(f, "value expected to be not None ({})", e),
+            MyErrors::Utf8Error(ref e) => write!(f, "UTF8 error ({})", e),
         }
     }
 }
@@ -166,6 +170,7 @@ impl error::Error for MyErrors {
             MyErrors::LockError(_) => None,
             MyErrors::ThreadPanic(_) => None,
             MyErrors::SomeError(_) => None,
+            MyErrors::Utf8Error(ref e) => Some(e),
         }
     }
 }
@@ -285,6 +290,23 @@ pub fn threadpool_read_files<P: Printable>(
     Ok(())
 }
 
+/// TODO: examine iterator, likely add async friendly iterator instead of forcing existing to work.
+pub async fn async_read_files<P: Printable>(
+    args: Arc<Cli>,
+    print_behaviour: P,
+) -> Result<(), MyErrors> {
+    let path_pattern =
+        my_regex::clean_up_regex(args.path_pattern.as_deref(), args.path_pattern_regex)?;
+    let iterator = find_files(&args.path, path_pattern);
+    let file_pattern_re =
+        my_regex::clean_up_regex(Some(&args.file_pattern), args.file_pattern_regex)?.ok_or(
+            MyErrors::SomeError("'file_pattern' is expected to exist".to_string()),
+        )?;
+    use_async::<_, _>(iterator, &file_pattern_re, print_behaviour).await?;
+
+    Ok(())
+}
+
 struct FileInfo {
     path: PathBuf,
     filename: String,
@@ -365,6 +387,69 @@ fn information_out_each_lock<const FLUSH_THRESHOLD: usize>(
     }
 
     Ok(())
+}
+
+async fn use_async<I, P: Printable>(
+    iterator: I,
+    re: &Regex,
+    print_behaviour: P,
+) -> Result<(), MyErrors>
+where
+    I: Iterator<Item = FileInfo>,
+{
+    let results: Vec<(String, Vec<String>)> = stream::iter(iterator)
+        .filter_map(|file| async move {
+            match find_entry_with_file_async(&file, re).await {
+                Err(err) => {
+                    eprintln!("Error while searching file {}", err);
+                    None
+                }
+                Ok(found) => {
+                    if !found.is_empty() {
+                        Some((file.get_identifier(), found))
+                    } else {
+                        None
+                    }
+                }
+            }
+        })
+        .collect()
+        .await;
+
+    print_behaviour.writeln(results, |r| information_out(&r))?;
+
+    Ok(())
+}
+
+async fn find_entry_with_file_async(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
+    let mut found_lines = Vec::new();
+
+    let mut file = tokio::fs::File::open(&f.path)
+        .await
+        .map_err(MyErrors::FileIO)?;
+    let mut buffer = Vec::new();
+
+    file.read_to_end(&mut buffer)
+        .await
+        .map_err(MyErrors::FileIO)?;
+
+    let contents = String::from_utf8(buffer).map_err(MyErrors::Utf8Error)?;
+
+    for (idx, line) in contents.lines().enumerate() {
+        let replaced = re.replace_all(line, |caps: &regex::Captures| {
+            Colour::Red.paint(&caps[0]).to_string()
+        });
+
+        if let Cow::Owned(_) = replaced {
+            found_lines.push(format!(
+                "{}:{}",
+                Colour::Green.paint(format!("{}", idx + 1)),
+                replaced
+            ));
+        }
+    }
+
+    Ok(found_lines)
 }
 
 fn use_single_thread<I, P: Printable>(
@@ -774,7 +859,10 @@ fn find_entry_within_file_rayon(f: &FileInfo, re: &Regex) -> Result<Vec<String>,
 mod tests {
     use std::path::{Path, PathBuf};
 
-    use crate::{find_entry_with_file_memmap, my_regex::{self, SearchMode}, FileInfo};
+    use crate::{
+        FileInfo, find_entry_with_file_memmap,
+        my_regex::{self, SearchMode},
+    };
 
     #[test]
     fn test_find_entry_with_file_memmap_basic_regex() {
@@ -785,9 +873,12 @@ mod tests {
             path: file_path,
         };
 
-        let re = my_regex::clean_up_regex(Some("Dis dignissim pulvinar senectus at porta aenean."),  SearchMode::Literal)
-            .expect("Expected to be able to create regex from string")
-            .unwrap();
+        let re = my_regex::clean_up_regex(
+            Some("Dis dignissim pulvinar senectus at porta aenean."),
+            SearchMode::Literal,
+        )
+        .expect("Expected to be able to create regex from string")
+        .unwrap();
 
         let r = find_entry_with_file_memmap(&file_info, &re);
 
@@ -811,9 +902,12 @@ mod tests {
             path: file_path,
         };
 
-        let re = my_regex::clean_up_regex(Some("Dis[ ]dignissim[ ]pulvinar[ ]senectus[ ]at[ ]porta[ ]aenean."), SearchMode::Regex)
-            .expect("Expected to be able to create regex from string")
-            .unwrap();
+        let re = my_regex::clean_up_regex(
+            Some("Dis[ ]dignissim[ ]pulvinar[ ]senectus[ ]at[ ]porta[ ]aenean."),
+            SearchMode::Regex,
+        )
+        .expect("Expected to be able to create regex from string")
+        .unwrap();
 
         let r = find_entry_with_file_memmap(&file_info, &re);
 
