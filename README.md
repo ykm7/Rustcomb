@@ -9,7 +9,7 @@ Therefore currently there are several implementations of grep like function runn
 * single/multiple threads
 * threadpools (which varied "CPUs")
 * Popular threading library Rayon.
-* TODO Async 
+* Async (Tokio)
 
 NOTE: The current project is not the final product. Given the nature of the project I will be making constant tweaks to improve the UX as well as attempting to correct/improve basic coding issues.
 
@@ -36,10 +36,13 @@ General
 
 ## Async
 Async implemented is performed with Tokio.
-Overall, there is a limited benefit for implementing this.
+~~Overall, there is a limited benefit for implementing this.
 Async benefits for IO usage, however this generally excludes file reading as the OS's underlining
 API does not take advantage of async and is usually blocking.
-https://tokio.rs/tokio/tutorial: "When not to use Tokio".
+https://tokio.rs/tokio/tutorial: "When not to use Tokio".~~
+
+based on benchmark results even with the most default implementation I seem to be seeing ns performance instead of ms when incorporating Tokio. Need further testing/investigation.
+
 Therefore this is primarily to provide some familiarity with Async Rust
 (not a new concept overall, as familiar with Async with webbased Typescript usage)
 
@@ -69,7 +72,7 @@ FILE_TO_DUPLICATE=light
 ```
 
 Example screenshot:
-[![Example screenshot:](/docs/images/benchmark_1.png)](/docs/images/benchmark_1.png)
+[![Example screenshot:](/docs/images/benchmark_basic_async_inclusion.png)](/docs/images/benchmark_1.png)
 
 ### File generation
 Generated with: [Lorem Ipsum Generator](https://loremipsum.io/generator?n=10&t=p)
