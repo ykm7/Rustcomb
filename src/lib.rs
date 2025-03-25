@@ -399,19 +399,15 @@ where
 {
     let results: Vec<(String, Vec<String>)> = stream::iter(iterator)
         .filter_map(|file| async move {
-            match find_entry_with_file_async(&file, re).await {
-                Err(err) => {
+            find_entry_with_file_async(&file, re)
+                .await
+                .map_err(|err| {
                     eprintln!("Error while searching file {}", err);
-                    None
-                }
-                Ok(found) => {
-                    if !found.is_empty() {
-                        Some((file.get_identifier(), found))
-                    } else {
-                        None
-                    }
-                }
-            }
+                    err
+                })
+                .ok()
+                .filter(|found| !found.is_empty())
+                .map(|found| (file.get_identifier(), found))
         })
         .collect()
         .await;
