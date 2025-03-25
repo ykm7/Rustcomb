@@ -34,6 +34,15 @@ General
 
 > cargo test
 
+## Async
+Async implemented is performed with Tokio.
+Overall, there is a limited benefit for implementing this.
+Async benefits for IO usage, however this generally excludes file reading as the OS's underlining
+API does not take advantage of async and is usually blocking.
+https://tokio.rs/tokio/tutorial: "When not to use Tokio".
+Therefore this is primarily to provide some familiarity with Async Rust
+(not a new concept overall, as familiar with Async with webbased Typescript usage)
+
 ## Benchmarking - [Criterion](https://bheisler.github.io/criterion.rs)
 As part of my continued understanding of how Rust operations I have established benchmarks of all file retrieving and parsing
 

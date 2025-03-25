@@ -8,7 +8,7 @@ use std::{
 };
 use wild::args_os;
 
-fn setup<P: Printable>(args: rustcomb::Cli, print_behaviour: P) -> Result<(), MyErrors> {
+async fn setup<P: Printable>(args: rustcomb::Cli, print_behaviour: P) -> Result<(), MyErrors> {
     println!("Args: {:?}", args);
     let cli = Arc::new(args);
 
@@ -73,6 +73,18 @@ fn setup<P: Printable>(args: rustcomb::Cli, print_behaviour: P) -> Result<(), My
     );
     println!("{rayon_elapsed_print}");
 
+    let start = Instant::now();
+    rustcomb::async_read_files(Arc::clone(&cli), print_behaviour).await?;
+    let async_elapsed = start.elapsed();
+    let async_elapsed_print = format!(
+        "{}",
+        Colour::Green.paint(format!(
+            "Time taken for identifying files (async_read_files): {:?}",
+            async_elapsed
+        ))
+    );
+    println!("{async_elapsed_print}");
+
     let mut handle = BufWriter::new(io::stdout());
     let mut output = String::new();
 
@@ -87,15 +99,18 @@ fn setup<P: Printable>(args: rustcomb::Cli, print_behaviour: P) -> Result<(), My
     output.push('\n');
     output.push_str(&rayon_elapsed_print.to_string());
     output.push('\n');
+    output.push_str(&async_elapsed_print.to_string());
+    output.push('\n');
 
     handle.write_all(output.as_bytes()).map_err(MyErrors::FileIO)?;
 
     Ok(())
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = rustcomb::Cli::parse_from(args_os());
-    if let Err(e) = setup(cli, PrintEnabled) {
+    if let Err(e) = setup(cli, PrintEnabled).await {
         eprintln!("Error: {}", e);
         std::process::exit(1);
     }
@@ -107,8 +122,8 @@ mod tests {
     // use assert_cmd::Command;
     // use predicates::prelude::*;
 
-    #[test]
-    fn test_setup_txt() {
+    #[tokio::test]
+    async fn test_setup_txt() {
         let args = vec![
             "Rustcomb",
             "test_files",
@@ -117,15 +132,15 @@ mod tests {
         ];
         let cli = rustcomb::Cli::parse_from(args);
         // Use setup_with_args instead of setup to pass custom arguments
-        assert!(setup(cli, PrintEnabled).is_ok());
+        assert!(setup(cli, PrintEnabled).await.is_ok());
     }
 
-    #[test]
-    fn test_setup_no_file_filter() {
+    #[tokio::test]
+    async fn test_setup_no_file_filter() {
         let args = vec!["Rustcomb", "test_files", "metus mus. Elit convallis"];
         let cli = rustcomb::Cli::parse_from(args);
         // Use setup_with_args instead of setup to pass custom arguments
-        assert!(setup(cli, PrintEnabled).is_ok());
+        assert!(setup(cli, PrintEnabled).await.is_ok());
     }
 
     // #[test]
