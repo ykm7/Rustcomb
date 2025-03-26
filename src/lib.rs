@@ -1,6 +1,7 @@
 use ansi_term::Colour;
 use clap::Parser;
 use core::fmt;
+use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use memmap2::MmapOptions;
 use my_regex::SearchMode;
@@ -10,7 +11,7 @@ use regex::bytes;
 use std::borrow::Cow;
 use std::error;
 use std::error::Error;
-use std::fmt::Display;
+use std::fmt::{Display, write};
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -145,6 +146,7 @@ pub enum MyErrors {
     LockError(String),
     ThreadPanic(String),
     SomeError(String),
+    TokioError(tokio::task::JoinError),
 }
 
 impl fmt::Display for MyErrors {
@@ -157,6 +159,7 @@ impl fmt::Display for MyErrors {
             MyErrors::ThreadPanic(ref e) => write!(f, "thread error ({})", e),
             MyErrors::SomeError(ref e) => write!(f, "value expected to be not None ({})", e),
             MyErrors::Utf8Error(ref e) => write!(f, "UTF8 error ({})", e),
+            MyErrors::TokioError(ref e) => write!(f, "TokioError error ({})", e),
         }
     }
 }
@@ -171,6 +174,7 @@ impl error::Error for MyErrors {
             MyErrors::ThreadPanic(_) => None,
             MyErrors::SomeError(_) => None,
             MyErrors::Utf8Error(ref e) => Some(e),
+            MyErrors::TokioError(ref e) => Some(e),
         }
     }
 }
@@ -302,7 +306,7 @@ pub async fn async_read_files<P: Printable>(
         my_regex::clean_up_regex(Some(&args.file_pattern), args.file_pattern_regex)?.ok_or(
             MyErrors::SomeError("'file_pattern' is expected to exist".to_string()),
         )?;
-    use_async::<_, _>(iterator, &file_pattern_re, print_behaviour).await?;
+    use_async_two::<_, _>(iterator, &file_pattern_re, print_behaviour).await?;
 
     Ok(())
 }
@@ -389,6 +393,65 @@ fn information_out_each_lock<const FLUSH_THRESHOLD: usize>(
     Ok(())
 }
 
+/// Perplexity assisted improvement on the existing system.
+async fn use_async_two<I, P: Printable>(
+    iterator: I,
+    re: &Regex,
+    print_behaviour: P,
+) -> Result<(), MyErrors>
+where
+    I: Iterator<Item = FileInfo>,
+{
+    let re = Arc::new(re.clone());
+    let results: Vec<(String, Vec<String>)> = stream::iter(iterator)
+        .map(|f: FileInfo| {
+        
+        let re_copy = re.clone();
+        async move {
+            let buffer = tokio::fs::read(&f.path).await.map_err(MyErrors::FileIO)?;
+            let found: Vec<String> =
+                tokio::task::spawn_blocking(move || -> Result<Vec<String>, MyErrors> {
+                    let mut found_lines = Vec::new();
+
+                    let contents = String::from_utf8(buffer).map_err(MyErrors::Utf8Error)?;
+                    for (idx, line) in contents.lines().enumerate() {
+                        let replaced = re_copy.replace_all(line, |caps: &regex::Captures| {
+                            Colour::Red.paint(&caps[0]).to_string()
+                        });
+
+                        if let Cow::Owned(_) = replaced {
+                            found_lines.push(format!(
+                                "{}:{}",
+                                Colour::Green.paint(format!("{}", idx + 1)),
+                                replaced
+                            ));
+                        }
+                    }
+
+                    Ok::<_, MyErrors>(found_lines)
+                })
+                .await
+                .map_err(MyErrors::TokioError)??;
+
+            Ok::<(String, Vec<String>), MyErrors>((f.get_identifier(), found))
+        }
+        })
+        .buffer_unordered(get_cpuworkers())
+        .try_filter_map(|result: (String, Vec<String>)| async move {
+            match result {
+                (id, found) if !found.is_empty() => Ok(Some((id, found))),
+                _ => Ok(None),
+                // Err(e) => Err(e)
+            }
+        })
+        .try_collect()
+        .await?;
+
+    print_behaviour.writeln(results, |r| information_out(&r))?;
+    Ok(())
+}
+
+#[allow(dead_code)]
 async fn use_async<I, P: Printable>(
     iterator: I,
     re: &Regex,
@@ -417,6 +480,7 @@ where
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn find_entry_with_file_async(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
     let mut found_lines = Vec::new();
 
