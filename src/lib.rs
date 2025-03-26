@@ -11,7 +11,7 @@ use regex::bytes;
 use std::borrow::Cow;
 use std::error;
 use std::error::Error;
-use std::fmt::{Display, write};
+use std::fmt::Display;
 use std::fs::File;
 use std::io::BufRead;
 use std::io::BufReader;
@@ -393,7 +393,6 @@ fn information_out_each_lock<const FLUSH_THRESHOLD: usize>(
     Ok(())
 }
 
-/// Perplexity assisted improvement on the existing system.
 async fn use_async_two<I, P: Printable>(
     iterator: I,
     re: &Regex,
@@ -402,49 +401,57 @@ async fn use_async_two<I, P: Printable>(
 where
     I: Iterator<Item = FileInfo>,
 {
-    let re = Arc::new(re.clone());
-    let results: Vec<(String, Vec<String>)> = stream::iter(iterator)
+    let results = stream::iter(iterator)
         .map(|f: FileInfo| {
-        
-        let re_copy = re.clone();
-        async move {
-            let buffer = tokio::fs::read(&f.path).await.map_err(MyErrors::FileIO)?;
-            let found: Vec<String> =
-                tokio::task::spawn_blocking(move || -> Result<Vec<String>, MyErrors> {
-                    let mut found_lines = Vec::new();
+            let identifier = f.get_identifier();
+            let path = f.path.clone();
+            let re_copy = re.clone();
 
-                    let contents = String::from_utf8(buffer).map_err(MyErrors::Utf8Error)?;
-                    for (idx, line) in contents.lines().enumerate() {
-                        let replaced = re_copy.replace_all(line, |caps: &regex::Captures| {
-                            Colour::Red.paint(&caps[0]).to_string()
-                        });
+            async move {
+                let buffer = tokio::fs::read(path).await.map_err(MyErrors::FileIO)?;
 
-                        if let Cow::Owned(_) = replaced {
-                            found_lines.push(format!(
-                                "{}:{}",
-                                Colour::Green.paint(format!("{}", idx + 1)),
-                                replaced
-                            ));
-                        }
-                    }
+                let found: Vec<String> = tokio::task::spawn_blocking(
+                    // useful when expecting a task/s which ARE CPU bound
+                    move || -> Result<Vec<String>, MyErrors> {
+                        let contents = String::from_utf8(buffer).map_err(MyErrors::Utf8Error)?;
+                        let found = contents
+                            .lines()
+                            .enumerate()
+                            .filter_map(|(idx, line)| -> Option<String> {
+                                let replaced =
+                                    re_copy.replace_all(line, |caps: &regex::Captures| {
+                                        Colour::Red.paint(&caps[0]).to_string()
+                                    });
 
-                    Ok::<_, MyErrors>(found_lines)
-                })
+                                if let Cow::Owned(_) = replaced {
+                                    Some(format!(
+                                        "{}:{}",
+                                        Colour::Green.paint(format!("{}", idx + 1)),
+                                        replaced
+                                    ))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<String>>();
+
+                        Ok(found)
+                    },
+                )
                 .await
                 .map_err(MyErrors::TokioError)??;
 
-            Ok::<(String, Vec<String>), MyErrors>((f.get_identifier(), found))
-        }
+                Ok::<(String, Vec<String>), MyErrors>((identifier, found))
+            }
         })
-        .buffer_unordered(get_cpuworkers())
+        .buffer_unordered(get_cpuworkers()) // controls memory usage by limiting concurrency to something the system can handle
         .try_filter_map(|result: (String, Vec<String>)| async move {
             match result {
                 (id, found) if !found.is_empty() => Ok(Some((id, found))),
                 _ => Ok(None),
-                // Err(e) => Err(e)
             }
         })
-        .try_collect()
+        .try_collect::<Vec<(String, Vec<String>)>>()
         .await?;
 
     print_behaviour.writeln(results, |r| information_out(&r))?;
