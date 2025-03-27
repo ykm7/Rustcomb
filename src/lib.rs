@@ -1,6 +1,7 @@
 use ansi_term::Colour;
 use clap::Parser;
 use core::fmt;
+use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use memmap2::MmapOptions;
 use my_regex::SearchMode;
@@ -145,6 +146,7 @@ pub enum MyErrors {
     LockError(String),
     ThreadPanic(String),
     SomeError(String),
+    TokioError(tokio::task::JoinError),
 }
 
 impl fmt::Display for MyErrors {
@@ -157,6 +159,7 @@ impl fmt::Display for MyErrors {
             MyErrors::ThreadPanic(ref e) => write!(f, "thread error ({})", e),
             MyErrors::SomeError(ref e) => write!(f, "value expected to be not None ({})", e),
             MyErrors::Utf8Error(ref e) => write!(f, "UTF8 error ({})", e),
+            MyErrors::TokioError(ref e) => write!(f, "TokioError error ({})", e),
         }
     }
 }
@@ -171,6 +174,7 @@ impl error::Error for MyErrors {
             MyErrors::ThreadPanic(_) => None,
             MyErrors::SomeError(_) => None,
             MyErrors::Utf8Error(ref e) => Some(e),
+            MyErrors::TokioError(ref e) => Some(e),
         }
     }
 }
@@ -302,7 +306,7 @@ pub async fn async_read_files<P: Printable>(
         my_regex::clean_up_regex(Some(&args.file_pattern), args.file_pattern_regex)?.ok_or(
             MyErrors::SomeError("'file_pattern' is expected to exist".to_string()),
         )?;
-    use_async::<_, _>(iterator, &file_pattern_re, print_behaviour).await?;
+    use_async_two::<_, _>(iterator, &file_pattern_re, print_behaviour).await?;
 
     Ok(())
 }
@@ -345,22 +349,16 @@ impl fmt::Display for FileInfo {
 
 fn information_out(results: &Vec<(String, Vec<String>)>) -> Result<(), MyErrors> {
     let found_matches_count = results.len();
-
     let mut handle = BufWriter::new(io::stdout());
-    let mut output = String::new();
-
-    output.push('\n');
-    output.push_str(&format!("Found {} files\n", found_matches_count));
+    writeln!(handle, "\nFound {} files", found_matches_count).map_err(MyErrors::FileIO)?;
     for (f, r) in results {
-        output.push_str(&format!("Filename found with matches: {}\n", f));
+        writeln!(handle, "Filename found with matches: {}", f).map_err(MyErrors::FileIO)?;
         for m in r {
-            output.push_str(&m.to_string());
-            output.push('\n');
+            writeln!(handle, "{}", m).map_err(MyErrors::FileIO)?;
         }
     }
-    handle
-        .write_all(output.as_bytes())
-        .map_err(MyErrors::FileIO)?;
+
+    handle.flush().map_err(MyErrors::FileIO)?;
     Ok(())
 }
 
@@ -389,6 +387,109 @@ fn information_out_each_lock<const FLUSH_THRESHOLD: usize>(
     Ok(())
 }
 
+async fn use_async_two<I, P: Printable>(
+    iterator: I,
+    re: &Regex,
+    print_behaviour: P,
+) -> Result<(), MyErrors>
+where
+    I: Iterator<Item = FileInfo>,
+{
+    let results = stream::iter(iterator)
+        .map(|f: FileInfo| {
+            let identifier = f.get_identifier();
+            let path = f.path.clone();
+            let re_copy = re.clone();
+
+            async move {
+                // // Option 1
+                // let file = tokio::fs::File::open(path)
+                //     .await
+                //     .map_err(MyErrors::FileIO)?;
+                // let reader = tokio::io::BufReader::new(file);
+                // let mut lines = reader.lines();
+
+                // let mut found: Vec<String> = Vec::new();
+                // let mut idx = 0;
+                // while let Some(line) = lines.next_line().await.map_err(MyErrors::FileIO)? {
+
+                //     let re_copy = re.clone();
+                //     idx += 1;
+
+                //     let inner_found = tokio::task::spawn_blocking(move || {
+                //         let replaced = re_copy.replace_all(&line, |caps: &regex::Captures| {
+                //             Colour::Red.paint(&caps[0]).to_string()
+                //         });
+
+                //         if let Cow::Owned(_) = replaced {
+                //             Some(format!(
+                //                 "{}:{}",
+                //                 Colour::Green.paint(format!("{}", idx)),
+                //                 replaced
+                //             ))
+                //         } else {
+                //             None
+                //         }
+                //     })
+                //     .await
+                //     .map_err(MyErrors::TokioError)?;
+
+                //     if let Some(line) = inner_found {
+                //         found.push(line);
+                //     }
+                // }
+
+                // Option 2
+                let buffer = tokio::fs::read(path).await.map_err(MyErrors::FileIO)?;
+                let found: Vec<String> = tokio::task::spawn_blocking(
+                    // useful when expecting a task/s which ARE CPU bound
+                    move || -> Result<Vec<String>, MyErrors> {
+                        let contents = String::from_utf8(buffer).map_err(MyErrors::Utf8Error)?;
+                        let found = contents
+                            .lines()
+                            .enumerate()
+                            .filter_map(|(idx, line)| -> Option<String> {
+                                let replaced =
+                                    re_copy.replace_all(line, |caps: &regex::Captures| {
+                                        Colour::Red.paint(&caps[0]).to_string()
+                                    });
+
+                                if let Cow::Owned(_) = replaced {
+                                    Some(format!(
+                                        "{}:{}",
+                                        Colour::Green.paint(format!("{}", idx + 1)),
+                                        replaced
+                                    ))
+                                } else {
+                                    None
+                                }
+                            })
+                            .collect::<Vec<String>>();
+
+                        Ok(found)
+                    },
+                )
+                .await
+                .map_err(MyErrors::TokioError)??;
+
+                Ok::<(String, Vec<String>), MyErrors>((identifier, found))
+            }
+        })
+        .buffer_unordered(get_cpuworkers()) // controls memory usage by limiting concurrency to something the system can handle
+        .try_filter_map(|result: (String, Vec<String>)| async move {
+            match result {
+                (id, found) if !found.is_empty() => Ok(Some((id, found))),
+                _ => Ok(None),
+            }
+        })
+        .try_collect::<Vec<(String, Vec<String>)>>()
+        .await?;
+
+    print_behaviour.writeln(results, |r| information_out(&r))?;
+    Ok(())
+}
+
+#[allow(dead_code)]
 async fn use_async<I, P: Printable>(
     iterator: I,
     re: &Regex,
@@ -417,6 +518,7 @@ where
     Ok(())
 }
 
+#[allow(dead_code)]
 async fn find_entry_with_file_async(f: &FileInfo, re: &Regex) -> Result<Vec<String>, MyErrors> {
     let mut found_lines = Vec::new();
 
