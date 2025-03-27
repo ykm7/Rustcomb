@@ -349,22 +349,16 @@ impl fmt::Display for FileInfo {
 
 fn information_out(results: &Vec<(String, Vec<String>)>) -> Result<(), MyErrors> {
     let found_matches_count = results.len();
-
     let mut handle = BufWriter::new(io::stdout());
-    let mut output = String::new();
-
-    output.push('\n');
-    output.push_str(&format!("Found {} files\n", found_matches_count));
+    writeln!(handle, "\nFound {} files", found_matches_count).map_err(MyErrors::FileIO)?;
     for (f, r) in results {
-        output.push_str(&format!("Filename found with matches: {}\n", f));
+        writeln!(handle, "Filename found with matches: {}", f).map_err(MyErrors::FileIO)?;
         for m in r {
-            output.push_str(&m.to_string());
-            output.push('\n');
+            writeln!(handle, "{}", m).map_err(MyErrors::FileIO)?;
         }
     }
-    handle
-        .write_all(output.as_bytes())
-        .map_err(MyErrors::FileIO)?;
+
+    handle.flush().map_err(MyErrors::FileIO)?;
     Ok(())
 }
 
@@ -408,8 +402,45 @@ where
             let re_copy = re.clone();
 
             async move {
-                let buffer = tokio::fs::read(path).await.map_err(MyErrors::FileIO)?;
+                // // Option 1
+                // let file = tokio::fs::File::open(path)
+                //     .await
+                //     .map_err(MyErrors::FileIO)?;
+                // let reader = tokio::io::BufReader::new(file);
+                // let mut lines = reader.lines();
 
+                // let mut found: Vec<String> = Vec::new();
+                // let mut idx = 0;
+                // while let Some(line) = lines.next_line().await.map_err(MyErrors::FileIO)? {
+
+                //     let re_copy = re.clone();
+                //     idx += 1;
+
+                //     let inner_found = tokio::task::spawn_blocking(move || {
+                //         let replaced = re_copy.replace_all(&line, |caps: &regex::Captures| {
+                //             Colour::Red.paint(&caps[0]).to_string()
+                //         });
+
+                //         if let Cow::Owned(_) = replaced {
+                //             Some(format!(
+                //                 "{}:{}",
+                //                 Colour::Green.paint(format!("{}", idx)),
+                //                 replaced
+                //             ))
+                //         } else {
+                //             None
+                //         }
+                //     })
+                //     .await
+                //     .map_err(MyErrors::TokioError)?;
+
+                //     if let Some(line) = inner_found {
+                //         found.push(line);
+                //     }
+                // }
+
+                // Option 2
+                let buffer = tokio::fs::read(path).await.map_err(MyErrors::FileIO)?;
                 let found: Vec<String> = tokio::task::spawn_blocking(
                     // useful when expecting a task/s which ARE CPU bound
                     move || -> Result<Vec<String>, MyErrors> {
