@@ -20,10 +20,10 @@ use std::io::StdoutLock;
 use std::io::{self, Write};
 use std::path::Path;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::PoisonError;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use threadpool::ThreadPool;
 use tokio::io::AsyncReadExt;
@@ -34,13 +34,21 @@ pub mod my_regex;
 /// an required bit of functionality.
 /// However it should result "logic" shifting from runtime to compile-time so should be beneficial too.
 pub trait Printable: Send + 'static + Copy + Clone {
-    fn writeln<F>(&self, data: Vec<(String, Vec<String>)>, func: F) -> Result<(), MyErrors>
+    fn writeln<I, F>(&self, data: I, func: F) -> Result<(), MyErrors>
     where
-        F: FnOnce(Vec<(String, Vec<String>)>) -> Result<(), MyErrors>;
+        F: FnOnce(I) -> Result<(), MyErrors>,
+        I: Iterator<Item = (String, Vec<String>)>;
+
+    fn writeln_rayon<I, F>(&self, data: I, func: F) -> Result<(), MyErrors>
+    where
+        F: FnOnce(I) -> Result<(), MyErrors>,
+        I: ParallelIterator<Item = (String, Vec<String>)>;
+
     fn writeln_w_handler<T, F>(&self, handler: &mut BufWriter<T>, func: F) -> Result<(), MyErrors>
     where
         T: std::io::Write,
         F: FnOnce(&mut BufWriter<T>) -> Result<(), MyErrors>;
+
     fn information_out<T, F>(
         &self,
         handler: &mut BufWriter<T>,
@@ -70,9 +78,18 @@ impl fmt::Display for PrintDisable {
 }
 
 impl Printable for PrintEnabled {
-    fn writeln<F>(&self, data: Vec<(String, Vec<String>)>, func: F) -> Result<(), MyErrors>
+    fn writeln<I, F>(&self, data: I, func: F) -> Result<(), MyErrors>
     where
-        F: FnOnce(Vec<(String, Vec<String>)>) -> Result<(), MyErrors>,
+        F: FnOnce(I) -> Result<(), MyErrors>,
+        I: Iterator<Item = (String, Vec<String>)>,
+    {
+        func(data)
+    }
+
+    fn writeln_rayon<I, F>(&self, data: I, func: F) -> Result<(), MyErrors>
+    where
+        F: FnOnce(I) -> Result<(), MyErrors>,
+        I: ParallelIterator<Item = (String, Vec<String>)>,
     {
         func(data)
     }
@@ -104,10 +121,21 @@ impl Printable for PrintEnabled {
 }
 
 impl Printable for PrintDisable {
-    fn writeln<F>(&self, _: Vec<(String, Vec<String>)>, _: F) -> Result<(), MyErrors>
+    fn writeln<I, F>(&self, data: I, _func: F) -> Result<(), MyErrors>
     where
-        F: FnOnce(Vec<(String, Vec<String>)>) -> Result<(), MyErrors>,
+        F: FnOnce(I) -> Result<(), MyErrors>,
+        I: Iterator<Item = (String, Vec<String>)>,
     {
+        data.for_each(drop);
+        Ok(())
+    }
+
+    fn writeln_rayon<I, F>(&self, data: I, _func: F) -> Result<(), MyErrors>
+    where
+        F: FnOnce(I) -> Result<(), MyErrors>,
+        I: ParallelIterator<Item = (String, Vec<String>)>,
+    {
+        data.for_each(drop);
         Ok(())
     }
 
@@ -178,6 +206,12 @@ impl error::Error for MyErrors {
         }
     }
 }
+
+// impl<T> From<std::sync::PoisonError<T>> for MyErrors {
+//     fn from(value: std::sync::PoisonError<T>) -> Self {
+//         MyErrors::PoisonError(format!("Mutex/RwLock poisoned: {}", err))
+//     }
+// }
 
 impl<T> From<PoisonError<T>> for MyErrors
 where
@@ -347,18 +381,59 @@ impl fmt::Display for FileInfo {
 //         .transpose()
 // }
 
-fn information_out(results: &Vec<(String, Vec<String>)>) -> Result<(), MyErrors> {
-    let found_matches_count = results.len();
+fn information_out<I>(mut results: I) -> Result<(), MyErrors>
+where
+    I: Iterator<Item = (String, Vec<String>)>,
+{
     let mut handle = BufWriter::new(io::stdout());
-    writeln!(handle, "\nFound {} files", found_matches_count).map_err(MyErrors::FileIO)?;
-    for (f, r) in results {
+
+    writeln!(handle).map_err(MyErrors::FileIO)?;
+
+    let found_matches_count: i32 = results.try_fold(0, |acc, (f, r)| {
         writeln!(handle, "Filename found with matches: {}", f).map_err(MyErrors::FileIO)?;
         for m in r {
             writeln!(handle, "{}", m).map_err(MyErrors::FileIO)?;
         }
-    }
+
+        Ok::<i32, MyErrors>(acc + 1)
+    })?;
+    writeln!(handle, "Found {} files", found_matches_count).map_err(MyErrors::FileIO)?;
 
     handle.flush().map_err(MyErrors::FileIO)?;
+    Ok(())
+}
+
+// TODO: handle unwraps
+fn information_out_rayon<I>(results: I) -> Result<(), MyErrors>
+where
+    I: ParallelIterator<Item = (String, Vec<String>)>,
+{
+    let mut stdout = BufWriter::new(io::stdout());
+    writeln!(stdout).map_err(MyErrors::FileIO)?;
+
+    let (count, buffer): (u32, String) = results
+        .try_fold(
+            || (0_u32, String::new()),
+            |(count, mut buffer), (f, r)| -> Result<(u32, String), MyErrors> {
+                buffer.push_str(&format!("Filename found with matches: {}", f));
+                r.iter().for_each(|m| buffer.push_str(m));
+                Ok((count + 1, buffer))
+            },
+        )
+        .try_reduce(
+            || (0_u32, String::new()),
+            |(a_count, mut a_buf), (b_count, b_buf)| {
+                a_buf.push_str(&b_buf);
+                Ok((a_count + b_count, a_buf))
+            },
+        )?;
+
+    stdout
+        .write_all(buffer.as_bytes())
+        .map_err(MyErrors::FileIO)?;
+
+    writeln!(stdout, "Found {} files", count).map_err(MyErrors::FileIO)?;
+    stdout.flush().map_err(MyErrors::FileIO)?;
     Ok(())
 }
 
@@ -485,7 +560,8 @@ where
         .try_collect::<Vec<(String, Vec<String>)>>()
         .await?;
 
-    print_behaviour.writeln(results, |r| information_out(&r))?;
+    // TODO: fix
+    print_behaviour.writeln(results.into_iter(), information_out)?;
     Ok(())
 }
 
@@ -513,7 +589,10 @@ where
         .collect()
         .await;
 
-    print_behaviour.writeln(results, |r| information_out(&r))?;
+    // results = results.into_iter();
+
+    // todo fix up
+    print_behaviour.writeln(results.into_iter(), information_out)?;
 
     Ok(())
 }
@@ -558,23 +637,21 @@ fn use_single_thread<I, P: Printable>(
 where
     I: Iterator<Item = FileInfo>,
 {
-    let results: Vec<(String, Vec<String>)> = iterator
-        .filter_map(|file| match find_entry_with_file_memmap(&file, re) {
-            Err(err) => {
-                eprintln!("Error while searching file {}", err);
+    let results = iterator.filter_map(|file| match find_entry_with_file_memmap(&file, re) {
+        Err(err) => {
+            eprintln!("Error while searching file {}", err);
+            None
+        }
+        Ok(found) => {
+            if !found.is_empty() {
+                Some((file.get_identifier(), found))
+            } else {
                 None
             }
-            Ok(found) => {
-                if !found.is_empty() {
-                    Some((file.get_identifier(), found))
-                } else {
-                    None
-                }
-            }
-        })
-        .collect();
+        }
+    });
 
-    print_behaviour.writeln(results, |r| information_out(&r))?;
+    print_behaviour.writeln(results, information_out)?;
 
     Ok(())
 }
@@ -590,32 +667,32 @@ fn use_thread_per_file<I, P: Printable>(
 where
     I: Iterator<Item = FileInfo>,
 {
-    let matched_paths = iterator.collect::<Vec<FileInfo>>();
-
-    let mut handles = Vec::new();
     let re = Arc::new(re.to_owned());
-    for file in matched_paths {
-        let re: Arc<Regex> = Arc::clone(&re);
-        let file_id = file.get_identifier();
-        let handle: thread::JoinHandle<Vec<String>> =
-            thread::spawn(move || match find_entry_with_file_memmap(&file, &re) {
-                Err(err) => {
-                    eprintln!("Error while searching file {}", err);
-                    Vec::new()
-                }
-                Ok(found) => found,
-            });
+    let results = iterator
+        .map(|file| {
+            let re: Arc<Regex> = Arc::clone(&re);
+            let file_id = file.get_identifier();
+            let handle: thread::JoinHandle<Vec<String>> =
+                thread::spawn(move || match find_entry_with_file_memmap(&file, &re) {
+                    Err(err) => {
+                        eprintln!("Error while searching file {}", err);
+                        Vec::new()
+                    }
+                    Ok(found) => found,
+                });
 
-        handles.push((file_id, handle));
-    }
+            (file_id, handle)
+        })
+        .filter_map(|f| match f.1.join() {
+            Ok(found) if !found.is_empty() => Some((f.0, found)),
+            Ok(_) => None,
+            Err(e) => {
+                eprintln!("Error 'joining' handle {:?}", e);
+                None
+            }
+        });
 
-    let results = handles
-        .into_iter()
-        .map(|f| (f.0, f.1.join().unwrap()))
-        .filter(|result| !result.1.is_empty())
-        .collect::<Vec<(String, _)>>();
-
-    print_behaviour.writeln(results, |r| information_out(&r))?;
+    print_behaviour.writeln(results, information_out)?;
 
     Ok(())
 }
@@ -702,7 +779,7 @@ where
     I: ParallelIterator<Item = Result<FileInfo, MyErrors>>,
 {
     let re = Arc::new(re.to_owned());
-    let results: Vec<_> = iterator
+    let results = iterator
         .filter_map(|item| match item {
             Ok(file) => Some(file),
             Err(err) => {
@@ -713,22 +790,16 @@ where
         .filter_map(|file| {
             let re: Arc<Regex> = Arc::clone(&re);
             match find_entry_within_file_rayon(&file, &re) {
-                Err(err) => {
-                    eprintln!("Error while searching file {}", err);
+                Ok(found) if !found.is_empty() => Some((file.get_identifier(), found)),
+                Ok(_) => None,
+                Err(e) => {
+                    eprintln!("Error searching file: {}", e);
                     None
                 }
-                Ok(found) => {
-                    if !found.is_empty() {
-                        Some((file.get_identifier(), found))
-                    } else {
-                        None
-                    }
-                }
             }
-        })
-        .collect();
+        });
 
-    print_behaviour.writeln(results, |r| information_out(&r))?;
+    print_behaviour.writeln_rayon(results, information_out_rayon)?;
 
     Ok(())
 }
