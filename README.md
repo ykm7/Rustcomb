@@ -1,24 +1,24 @@
 # Rustcomb
 
-This project is another Grep style program written is Rust.
+This project is another grep-style program written in Rust.
 
-Purpose of this is primarily to function as a learning ground for Rust.
+The purpose of this is primarily to function as a learning ground for Rust.
 Output format taken from: [ripgrep](https://github.com/BurntSushi/ripgrep) as this appears to be the most prominent Rust CLI search tool.
 
-Therefore currently there are several implementations of grep like function running on serial using a variety of:
+Therefore, currently there are several implementations of a grep-like function running on serial using a variety of:
 * single/multiple threads
 * threadpools (which varied "CPUs")
 * Popular threading library Rayon.
 * Async (Tokio)
 
-NOTE: The current project is not the final product. Given the nature of the project I will be making constant tweaks to improve the UX as well as attempting to correct/improve basic coding issues.
+NOTE: The current project is not the final product. Given the nature of the project, I will be making constant tweaks to improve the UX as well as attempting to correct/improve basic coding issues.
 
 ## Example screenshots:
 
 No path filter specified
 [![Example no path filter specified:](/docs/images/runtime_no_path_filer_literal.png)](/docs/images/runtime_no_path_filer_literal.png)
 
-Regex applied to both file names as well as internal file search. These can be mixed and matched
+Regex is applied to both file names and internal file searches. These can be mixed and matched
 [![Example no path filter specified:](/docs/images/runtime_regex.png)](/docs/images/runtime_regex.png)
 
 ## CLI
@@ -35,21 +35,21 @@ General
 > cargo test
 
 ## Async
-Async implemented is performed with Tokio.
+Async implementation is performed with Tokio.
 ~~Overall, there is a limited benefit for implementing this.
 Async benefits for IO usage, however this generally excludes file reading as the OS's underlining
 API does not take advantage of async and is usually blocking.
 https://tokio.rs/tokio/tutorial: "When not to use Tokio".~~
 
-based on benchmark results even with the most default implementation I seem to be seeing ns performance instead of ms when incorporating Tokio. Need further testing/investigation.
+based on benchmark results, even with the default implementation, I seem to be seeing no performance instead of ms when incorporating Tokio. Need further testing/investigation.
 
-Therefore this is primarily to provide some familiarity with Async Rust
-(not a new concept overall, as familiar with Async with webbased Typescript usage)
+Therefore, this is primarily to provide some familiarity with Async Rust
+(not a new concept overall, as familiar with Async with web-based Typescript usage)
 
 ## Benchmarking - [Criterion](https://bheisler.github.io/criterion.rs)
 As part of my continued understanding of how Rust operations I have established benchmarks of all file retrieving and parsing
 
-A environment file should be supplied within the `benches` directory.
+An environment file should be supplied within the `benches` directory.
 
 ```.env
 // Number of files to duplicate
@@ -89,7 +89,7 @@ Generated with: [Lorem Ipsum Generator](https://loremipsum.io/generator?n=10&t=p
 Benchmark all
 > cargo bench
 
-Available manual benches to benchmark particular one
+Available manual benches to benchmark a particular one
 
 > cargo bench --bench my_benchmark single_thread_read_files
 
@@ -120,7 +120,7 @@ Or with benchmarks
 View output
 > perf report
 
-For all the benchmarks for comparision
+For all the benchmarks for comparison
 
     perf record -o single_thread_read_files.data cargo bench --bench my_benchmark single_thread_read_files &&
     perf record -o thread_per_file_read_files.data cargo bench --bench my_benchmark thread_per_file_read_files &&
@@ -133,7 +133,7 @@ For all the benchmarks for comparision
 
 ## Linting (Clippy)
 
-Clippy is [used](https://github.com/rust-lang/rust-clippy) to try to pick up addition issues/suggestions. Very handy while learning.
+Clippy is [used](https://github.com/rust-lang/rust-clippy) to try to pick up additional issues/suggestions. Very handy while learning.
 
 ## Misc
 
@@ -143,7 +143,7 @@ Clippy is [used](https://github.com/rust-lang/rust-clippy) to try to pick up add
 
 ## OS
 
-My current development environment is Windows, however using WSL (Ubuntu) to access linux profiling tools.
+My current development environment is Windows, however, using WSL (Ubuntu) to access linux profiling tools.
 
 ### Ubuntu (WSL)
 
@@ -174,8 +174,8 @@ WSL error
 
 > sudo apt install linux-tools-generic
 
-WSL2 uses a custom kernel so have to build our own `perf`.
-Although from what I am reading it makes sense that running perf within a VM may be limited.
+WSL2 uses a custom kernel, so have to build our own `perf`.
+Although from what I am reading, it makes sense that running perf within a VM may be limited.
 
 > https://stackoverflow.com/questions/60237123/is-there-any-method-to-run-perf-under-wsl
 
